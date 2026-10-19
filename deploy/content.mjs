@@ -100,6 +100,9 @@ export function describeContent(message) {
             return joinLines(`✅ Việc cần làm: ${c.title || params.content || ""}`, c.description);
         case "chat.sticker":
             return "[Sticker]";
+        case "chat.ecard":
+            // Thẻ hệ thống (nhắc hẹn, ...): href chỉ là ảnh nền của thẻ.
+            return joinLines(`🎴 ${c.title || "Thẻ"}`, c.description);
         default: {
             const parts = [c.title, c.description, c.href].filter((v) => typeof v === "string" && v.trim());
             return `[${type}]${parts.length ? " " + parts.join(" ") : ""}`;

@@ -170,6 +170,18 @@ test("describeContent hiển thị link, danh thiếp, bình chọn, vị trí, 
     assert.equal(describeContent(place), "📍 Vị trí: Quán\nhttps://maps.google.com/?q=10.77,106.7");
     assert.deepEqual(findCoordinates({ params: "not json" }), null);
     assert.equal(describeContent({ data: { msgType: "chat.sticker", content: { id: 1, catId: 2 } } }), "[Sticker]");
+    // Thẻ nhắc hẹn ghi từ Zalo desktop: href là ảnh nền, không hiện.
+    const ecard = {
+        data: {
+            msgType: "chat.ecard",
+            content: {
+                title: "⏰ Họp",
+                description: "Thứ Hai, 19 tháng 10 lúc 23:43",
+                href: "https://res-zalo.zadn.vn/upload/media/2018/8/3/reminder_02.png",
+            },
+        },
+    };
+    assert.equal(describeContent(ecard), "🎴 ⏰ Họp\nThứ Hai, 19 tháng 10 lúc 23:43");
 });
 
 test("quoteText, reactionEmoji và groupEventText", () => {
