@@ -1,0 +1,52 @@
+# Fork-only: kiểm tra deploy/ hằng ngày, cả trên code fork lẫn sau khi merge thử upstream,
+# để phát hiện sớm thay đổi upstream (API zca-js) làm vỡ bot/gateway/login.
+name: deploy-daily
+
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/**", "src/**", ".github/workflows/deploy-daily.yml"]
+  schedule:
+    - cron: "0 0 * * *" # 07:00 giờ Việt Nam
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [fork, upstream-merge]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge thử upstream/main (không push)
+        if: matrix.variant == 'upstream-merge'
+        run: |
+          git remote add upstream https://github.com/RFS-ADRENO/zca-js.git
+          git fetch --quiet upstream main
+          echo "upstream mới hơn fork: $(git rev-list --count HEAD..upstream/main) commit"
+          git -c user.name=ci -c user.email=ci@localhost merge --no-edit upstream/main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build dist/ như Dockerfile
+        run: |
+          npm ci --ignore-scripts
+          node scripts/buildAPI.js
+          npx tsc
+
+      - name: Test deploy
+        run: node --test deploy/tests/deploy.test.mjs
+
+      - name: Kiểm tra cú pháp và định dạng deploy
+        run: |
+          for f in deploy/*.mjs; do node --check "$f"; done
+          npx -y prettier@3.3.3 --check deploy/*.mjs deploy/tests/*.mjs
