@@ -59,6 +59,17 @@ export function findCoordinates(content) {
     return null;
 }
 
+/** Nhật ký cuộc gọi (chat.recommended, action recommened.misscall/...): params có callId, duration (giây), calltype. */
+function callText(action, params) {
+    const kind = Number(params.calltype) === 1 ? "video" : "thoại";
+    if (String(action || "").includes("misscall")) return `📞 Cuộc gọi ${kind} nhỡ`;
+    const seconds = Number(params.duration) || 0;
+    if (seconds <= 0) return `📞 Cuộc gọi ${kind}`;
+    const mm = Math.floor(seconds / 60);
+    const ss = String(seconds % 60).padStart(2, "0");
+    return `📞 Cuộc gọi ${kind} · ${mm}:${ss}`;
+}
+
 /** Chữ hiển thị cho một tin Zalo (không gồm phần file tải về). */
 export function describeContent(message) {
     const data = message.data || {};
@@ -69,6 +80,7 @@ export function describeContent(message) {
     const params = parseJson(c.params) || {};
     switch (type) {
         case "chat.recommended":
+            if (params.callId != null) return callText(c.action, params);
             if (c.action === "recommened.user") {
                 const card = parseJson(c.description) || {};
                 return joinLines(
@@ -122,6 +134,10 @@ export function describeContent(message) {
 export function systemNoticeText(message) {
     const data = message.data || {};
     const c = data.content;
+    if (data.msgType === "chat.ecard" && (data.uidFrom === "0" || data.dName === "Zalo")) {
+        // Nhắc hẹn đến giờ: Zalo tự gửi thẻ vào hội thoại.
+        return describeContent(message);
+    }
     if (data.msgType !== "webchat" || !c || typeof c !== "object") return null;
     return [c.title, c.description].filter((v) => typeof v === "string" && v.trim()).join("\n") || null;
 }

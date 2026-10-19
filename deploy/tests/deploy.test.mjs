@@ -245,6 +245,36 @@ test("isBotEcho bỏ qua tin isSelf vừa được bot gửi, giữ tin chủ t�
     assert.equal(isBotEcho("acc", { threadId: "t1", data: { msgId: "x1", content: "chào" } }), false);
 });
 
+test("describeContent hiển thị nhật ký cuộc gọi Zalo", () => {
+    const call = (action, params) =>
+        describeContent({
+            data: {
+                msgType: "chat.recommended",
+                content: {
+                    title: "sendBubbleMessage",
+                    description: "Cuộc gọi",
+                    action,
+                    params: JSON.stringify(params),
+                },
+            },
+        });
+    // Payload thật của cuộc gọi nhỡ từ Zalo desktop.
+    assert.equal(
+        call("recommened.misscall", { callId: 1427313081, duration: 0, reason: 0, isCaller: 0, calltype: 0 }),
+        "📞 Cuộc gọi thoại nhỡ",
+    );
+    assert.equal(call("recommened.calltime", { callId: 1, duration: 83, calltype: 1 }), "📞 Cuộc gọi video · 1:23");
+    assert.equal(call("recommened.calltime", { callId: 1, duration: 0, calltype: 0 }), "📞 Cuộc gọi thoại");
+});
+
+test("systemNoticeText: nhắc hẹn đến giờ do Zalo gửi là thông báo", () => {
+    const ecard = (dName) => ({
+        data: { msgType: "chat.ecard", dName, uidFrom: "123", content: { title: "⏰ Họp", description: "23:43" } },
+    });
+    assert.equal(systemNoticeText(ecard("Zalo")), "🎴 ⏰ Họp\n23:43");
+    assert.equal(systemNoticeText(ecard("An")), null);
+});
+
 test("systemNoticeText nhận ra thông báo hệ thống webchat dạng object", () => {
     const notice = { data: { msgType: "webchat", content: { title: "Bạn vừa kết bạn với An" } } };
     assert.equal(systemNoticeText(notice), "Bạn vừa kết bạn với An");
