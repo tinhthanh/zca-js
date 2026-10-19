@@ -33,7 +33,7 @@ docker compose restart bot
 
 ## 🔗 Omnichannel mode
 
-Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer message is forwarded to the gateway (`POST /v1/inbound`), the bot serves `POST /send` on `BOT_HTTP_PORT` (default 7001) for agent replies, and `/ping`-style commands are disabled (`BOT_COMMANDS=1` to keep them). Groups carry the group name (`getGroupInfo`, cached); images, stickers and files become a one-line description. The full stack lives in the `omnichannel` repository.
+Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer message is forwarded to the gateway (`POST /v1/inbound`), the bot serves `POST /send` on `BOT_HTTP_PORT` (default 7001) for agent replies, and `/ping`-style commands are disabled (`BOT_COMMANDS=1` to keep them). Groups carry the group name (`getGroupInfo`, cached). Images, files, videos, voice notes and GIFs are downloaded from Zalo's CDN (up to `GATEWAY_MAX_FILE_MB`, default 20 MiB) and sent as base64; stickers and links become a one-line description. Agent files go out through `sendMessage` with `{data, filename, metadata}`; PNG/JPEG/GIF/WebP dimensions are read from the header, so `sharp` is not needed. A `ZaloApiError` with a code (Zalo refused the message) returns 422 so the gateway does not retry; other failures return 502. The full stack lives in the `omnichannel` repository.
 
 ## 🩺 Healthcheck and resources
 

@@ -33,7 +33,7 @@ docker compose restart bot
 
 ## 🔗 Chế độ omnichannel
 
-Đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự): mọi tin khách được chuyển tới gateway (`POST /v1/inbound`), bot mở `POST /send` tại `BOT_HTTP_PORT` (mặc định 7001) để nhận tin nhân viên trả lời, và lệnh `/ping`... bị tắt (`BOT_COMMANDS=1` để bật lại). Nhóm được gửi kèm tên nhóm (`getGroupInfo`, có cache); ảnh, sticker, file được chuyển thành dòng mô tả. Stack đầy đủ nằm ở repo `omnichannel`.
+Đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự): mọi tin khách được chuyển tới gateway (`POST /v1/inbound`), bot mở `POST /send` tại `BOT_HTTP_PORT` (mặc định 7001) để nhận tin nhân viên trả lời, và lệnh `/ping`... bị tắt (`BOT_COMMANDS=1` để bật lại). Nhóm được gửi kèm tên nhóm (`getGroupInfo`, có cache). Ảnh, file, video, voice, GIF được tải từ CDN của Zalo (tối đa `GATEWAY_MAX_FILE_MB`, mặc định 20 MiB) và gửi kèm base64; sticker và link chỉ thành dòng mô tả. File nhân viên gửi đi bằng `sendMessage` với `{data, filename, metadata}`; kích thước ảnh PNG/JPEG/GIF/WebP được đọc từ header nên không cần `sharp`. Lỗi `ZaloApiError` có mã (Zalo từ chối hẳn) trả 422 để gateway không thử lại; lỗi khác trả 502. Stack đầy đủ nằm ở repo `omnichannel`.
 
 ## 🩺 Healthcheck và tài nguyên
 
