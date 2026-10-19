@@ -1,0 +1,16 @@
+.git
+.github
+.husky
+.vscode
+node_modules
+dist
+test
+examples
+**/*.log
+**/credentials.json
+**/qr.png
+deploy
+!deploy/common.mjs
+!deploy/login.mjs
+!deploy/bot.mjs
+!deploy/gateway.mjs

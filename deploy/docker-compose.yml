@@ -1,0 +1,84 @@
+# Chạy: cd deploy && docker compose up -d --build
+#   1. "login" hiển thị mã QR tại http://localhost:6081; quét bằng app Zalo.
+#   2. Đăng nhập xong, "login" ghi /data/accounts/$ACCOUNT/credentials.json rồi tự dừng.
+#   3. "bot" khởi động sau khi "login" thành công và chạy mọi tài khoản.
+# Thêm tài khoản: ACCOUNT=acc2 docker compose run --rm --service-ports login
+#                 docker compose restart bot
+# Đăng nhập lại: FORCE_LOGIN=1 ACCOUNT=<tên> docker compose run --rm --service-ports login
+
+name: zalo-bot
+
+x-hardening: &hardening
+    init: true
+    read_only: true
+    security_opt:
+        - no-new-privileges:true
+    cap_drop:
+        - ALL
+    volumes:
+        - zalo-data:/data
+    logging:
+        driver: json-file
+        options:
+            max-size: "5m"
+            max-file: "2"
+
+services:
+    login:
+        <<: *hardening
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile
+        image: zalo-bot
+        command: ["node", "deploy/login.mjs"]
+        restart: "no"
+        ports:
+            # Chỉ bind localhost; trang QR không mở ra mạng ngoài.
+            - "127.0.0.1:6081:6081"
+        environment:
+            ACCOUNT: ${ACCOUNT:-default}
+            FORCE_LOGIN: ${FORCE_LOGIN:-0}
+            MAX_QR: ${MAX_QR:-5}
+        tmpfs:
+            - /tmp:size=8m
+        deploy:
+            resources:
+                limits:
+                    cpus: "0.5"
+                    memory: 192M
+
+    bot:
+        <<: *hardening
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile
+        image: zalo-bot
+        command: ["node", "deploy/bot.mjs"]
+        # bot.mjs tự thử lại có giới hạn và không thoát khi mọi tài khoản bị bỏ
+        # (chỉ báo unhealthy), nên unless-stopped không tạo vòng lặp đăng nhập.
+        restart: unless-stopped
+        depends_on:
+            login:
+                condition: service_completed_successfully
+        environment:
+            BOT_PREFIX: ${BOT_PREFIX:-/}
+        tmpfs:
+            - /tmp:size=8m
+        healthcheck:
+            # Healthy chỉ khi mọi tài khoản đã kết nối listener ("running"). Dùng grep
+            # thay vì node để không khởi động thêm một tiến trình ~30 MiB mỗi phút.
+            test:
+                - CMD-SHELL
+                - grep -q '"running"' "$$ZALO_HEALTH_FILE" && ! grep -qE '"(starting|retrying|dropped)"' "$$ZALO_HEALTH_FILE"
+            interval: 60s
+            timeout: 5s
+            start_period: 120s
+            retries: 2
+        deploy:
+            resources:
+                limits:
+                    cpus: ${BOT_CPUS:-0.5}
+                    memory: ${BOT_MEMORY_LIMIT:-256M}
+
+volumes:
+    zalo-data:
