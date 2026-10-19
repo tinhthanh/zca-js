@@ -8,7 +8,15 @@ import http from "node:http";
 
 import { ThreadType, ZaloApiError } from "../dist/index.js";
 import { log } from "./common.mjs";
-import { describeContent, groupEventText, quoteText, reactionEmoji, RecentMessages, summarize } from "./content.mjs";
+import {
+    describeContent,
+    groupEventText,
+    quoteText,
+    reactionEmoji,
+    RecentMessages,
+    summarize,
+    systemNoticeText,
+} from "./content.mjs";
 
 export { describeContent };
 
@@ -204,6 +212,12 @@ async function postEvent(account, threadId, isGroup, kind, senderName, text, mes
 export async function forwardMessage(account, api, message) {
     rememberMessage(account, message);
     const isGroup = message.type === ThreadType.Group;
+    const notice = systemNoticeText(message);
+    if (notice) {
+        // Thông báo hệ thống (kết bạn...) không phải tin khách: ghi chú.
+        await postEvent(account, message.threadId, isGroup, "system", "", notice, message.data?.msgId);
+        return;
+    }
     if (message.isSelf) {
         if (isBotEcho(account, message)) return;
         const { text, attachments } = await collect(account, api, message);

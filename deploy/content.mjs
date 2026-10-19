@@ -107,6 +107,15 @@ export function describeContent(message) {
     }
 }
 
+/** Thông báo hệ thống của Zalo ("Bạn vừa kết bạn với ...") có msgType webchat nhưng
+ *  content là object: không phải tin khách, nên thành ghi chú. Trả về chữ hoặc null. */
+export function systemNoticeText(message) {
+    const data = message.data || {};
+    const c = data.content;
+    if (data.msgType !== "webchat" || !c || typeof c !== "object") return null;
+    return [c.title, c.description].filter((v) => typeof v === "string" && v.trim()).join("\n") || null;
+}
+
 /** Dòng tóm tắt một tin để nhớ (cho thu hồi/reaction) và để trích dẫn. */
 export function summarize(message) {
     const text = describeContent(message).replace(/\s+/g, " ").trim();

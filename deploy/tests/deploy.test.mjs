@@ -6,7 +6,14 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { discoverAccounts, isValidCredentials, readCredentials, writePrivateJson } from "../common.mjs";
-import { findCoordinates, groupEventText, quoteText, reactionEmoji, RecentMessages } from "../content.mjs";
+import {
+    findCoordinates,
+    groupEventText,
+    quoteText,
+    reactionEmoji,
+    RecentMessages,
+    systemNoticeText,
+} from "../content.mjs";
 import { describeContent, downloadAttachment, imageSize, isBotEcho, toAttachmentSource } from "../gateway.mjs";
 
 function tempDir() {
@@ -190,4 +197,11 @@ test("RecentMessages giới hạn kích thước theo LRU", () => {
 test("isBotEcho bỏ qua tin isSelf vừa được bot gửi, giữ tin chủ tài khoản tự gửi", () => {
     // Không có tin chờ: tin isSelf là của chủ tài khoản.
     assert.equal(isBotEcho("acc", { threadId: "t1", data: { msgId: "x1", content: "chào" } }), false);
+});
+
+test("systemNoticeText nhận ra thông báo hệ thống webchat dạng object", () => {
+    const notice = { data: { msgType: "webchat", content: { title: "Bạn vừa kết bạn với An" } } };
+    assert.equal(systemNoticeText(notice), "Bạn vừa kết bạn với An");
+    assert.equal(systemNoticeText({ data: { msgType: "webchat", content: "chào" } }), null);
+    assert.equal(systemNoticeText({ data: { msgType: "chat.photo", content: { title: "x" } } }), null);
 });
