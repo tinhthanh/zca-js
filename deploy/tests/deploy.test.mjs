@@ -18,9 +18,11 @@ import {
     captionOf,
     describeContent,
     downloadAttachment,
+    downloadVideoThumb,
     imageSize,
     isBotEcho,
     toAttachmentSource,
+    videoText,
 } from "../gateway.mjs";
 
 function tempDir() {
@@ -98,6 +100,27 @@ test("captionOf giữ chú thích ảnh/video, bỏ tên file", () => {
     assert.equal(of("chat.video.msg", "UI-10 video"), "UI-10 video");
     assert.equal(of("share.file", "bao-gia.pdf"), "");
     assert.equal(of("chat.voice", ""), "");
+});
+
+test("videoText kèm thời lượng và link; downloadVideoThumb chỉ nhận ảnh", async () => {
+    const video = (title, params) => ({
+        data: {
+            msgType: "chat.video.msg",
+            content: { title, href: "https://video.zdn.vn/v.mp4", thumb: "https://thumb.zdn.vn/t.jpg", params },
+        },
+    });
+    assert.equal(
+        videoText(video("Clip", JSON.stringify({ duration: 65000 }))),
+        "Clip\n🎬 Video · 1:05\n▶️ Xem: https://video.zdn.vn/v.mp4",
+    );
+    assert.equal(videoText(video("", "không phải json")), "🎬 Video\n▶️ Xem: https://video.zdn.vn/v.mp4");
+    const thumb = await downloadVideoThumb(video("", ""), fakeFetch("J", { "content-type": "image/jpeg" }));
+    assert.equal(thumb.name, "xem-truoc-video.jpg");
+    assert.equal(await downloadVideoThumb(video("", ""), fakeFetch("x", { "content-type": "text/html" })), null);
+    assert.equal(
+        await downloadVideoThumb({ data: { msgType: "chat.photo", content: { thumb: "https://a/b.jpg" } } }),
+        null,
+    );
 });
 
 test("imageSize đọc PNG, JPEG, GIF và bỏ qua dữ liệu lạ", () => {

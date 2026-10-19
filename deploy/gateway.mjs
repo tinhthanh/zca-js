@@ -52,7 +52,8 @@ const EXT_BY_TYPE = {
 };
 
 const apis = new Map(); // account -> zca-js API
-const groupNames = new Map(); // `${account}:${groupId}` -> tên nhóm
+const profiles = new Map(); // `${account}:${g|u}:${id}` -> {name, avatar, at}
+const PROFILE_TTL_MS = 6 * 60 * 60 * 1000; // avatar đổi thì sau vài giờ mới cập nhật
 const recentReplies = new Set();
 const recent = new RecentMessages(); // `${account}:${cliMsgId|msgId}` -> {summary, sender}
 const botSent = new RecentMessages(2048); // `${account}:${msgId}` của tin bot gửi qua /send
@@ -85,18 +86,34 @@ export function unregisterAccount(account) {
     apis.delete(account);
 }
 
-async function threadName(account, api, message, isGroup) {
-    if (!isGroup) return message.data?.dName || "";
-    const key = `${account}:${message.threadId}`;
-    if (!groupNames.has(key)) {
-        try {
-            const info = await api.getGroupInfo(message.threadId);
-            groupNames.set(key, info?.gridInfoMap?.[message.threadId]?.name || "");
-        } catch {
-            groupNames.set(key, "");
+async function threadFields(account, api, message, isGroup) {
+    const profile = await threadProfile(account, api, message, isGroup);
+    return { thread_name: isGroup ? profile.name : message.data?.dName || profile.name, thread_avatar: profile.avatar };
+}
+
+/** Tên và avatar của hội thoại: nhóm thì của nhóm, 1-1 thì của người gửi. Lỗi tra cứu không chặn tin. */
+async function threadProfile(account, api, message, isGroup) {
+    const id = isGroup ? message.threadId : message.data?.uidFrom;
+    const fallback = { name: isGroup ? "" : message.data?.dName || "", avatar: "" };
+    if (!id) return fallback;
+    const key = `${account}:${isGroup ? "g" : "u"}:${id}`;
+    const cached = profiles.get(key);
+    if (cached && Date.now() - cached.at < PROFILE_TTL_MS) return { ...cached, name: cached.name || fallback.name };
+    let found = { name: "", avatar: "" };
+    try {
+        if (isGroup) {
+            const info = (await api.getGroupInfo(id))?.gridInfoMap?.[id];
+            found = { name: info?.name || "", avatar: info?.fullAvt || info?.avt || "" };
+        } else {
+            const changed = (await api.getUserInfo(id))?.changed_profiles || {};
+            const user = changed[id] || changed[`${id}_0`];
+            found = { name: user?.displayName || user?.zaloName || "", avatar: user?.avatar || "" };
         }
+    } catch {
+        // Giữ chỗ để không tra lại liên tục khi API lỗi.
     }
-    return groupNames.get(key);
+    profiles.set(key, { ...found, at: Date.now() });
+    return { name: found.name || fallback.name, avatar: found.avatar };
 }
 
 function withExtension(name, contentType) {
@@ -155,14 +172,53 @@ export function captionOf(message) {
     return CAPTIONED.has(message.data?.msgType) && typeof title === "string" ? title.trim() : "";
 }
 
+/** Libredesk chưa có trình phát video: kèm ảnh xem trước, thời lượng và link mở trên trình duyệt. */
+export function videoText(message) {
+    const c = message.data?.content || {};
+    let params = {};
+    try {
+        params = typeof c.params === "string" ? JSON.parse(c.params) : {};
+    } catch {
+        params = {};
+    }
+    const seconds = Math.round((Number(params.duration) || 0) / 1000);
+    const length = seconds > 0 ? ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : "";
+    const lines = [captionOf(message), `🎬 Video${length}`];
+    if (typeof c.href === "string" && /^https:\/\//.test(c.href)) lines.push(`▶️ Xem: ${c.href}`);
+    return lines.filter(Boolean).join("\n");
+}
+
+/** Ảnh xem trước của video (content.thumb), hoặc null. */
+export async function downloadVideoThumb(message, fetchImpl = fetch) {
+    const thumb = message.data?.content?.thumb;
+    if (message.data?.msgType !== "chat.video.msg" || typeof thumb !== "string" || !/^https:\/\//.test(thumb)) {
+        return null;
+    }
+    const response = await fetchImpl(thumb, { signal: AbortSignal.timeout(30_000) });
+    const contentType = (response.headers.get("content-type") || "").split(";")[0];
+    if (!response.ok || !contentType.startsWith("image/")) return null;
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.length === 0 || data.length > MAX_FILE_BYTES) return null;
+    return {
+        name: withExtension("xem-truoc-video", contentType),
+        content_type: contentType,
+        data: data.toString("base64"),
+    };
+}
+
 async function collect(account, api, message) {
     let text = describeContent(message);
     const attachments = [];
     try {
         const file = (await downloadAttachment(message)) || (await downloadSticker(api, message));
         if (file) {
-            attachments.push(file);
             text = captionOf(message);
+            if (message.data?.msgType === "chat.video.msg") {
+                const thumb = await downloadVideoThumb(message).catch(() => null);
+                if (thumb) attachments.push(thumb);
+                text = videoText(message);
+            }
+            attachments.push(file);
         }
     } catch (error) {
         log(account, "gateway", `Không tải được file đính kèm, gửi mô tả thay thế: ${error.message}`);
@@ -248,7 +304,7 @@ export async function forwardMessage(account, api, message) {
             account,
             thread_id: String(message.threadId),
             is_group: isGroup,
-            thread_name: await threadName(account, api, message, isGroup),
+            ...(await threadFields(account, api, message, isGroup)),
             sender_name: message.data?.dName || "",
             text,
             message_id: String(message.data?.msgId || ""),
