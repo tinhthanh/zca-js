@@ -35,6 +35,17 @@ docker compose restart bot
 
 Đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự): mọi tin khách được chuyển tới gateway (`POST /v1/inbound`), bot mở `POST /send` tại `BOT_HTTP_PORT` (mặc định 7001) để nhận tin nhân viên trả lời, và lệnh `/ping`... bị tắt (`BOT_COMMANDS=1` để bật lại). Nhóm được gửi kèm tên nhóm (`getGroupInfo`, có cache). Ảnh, file, video, voice, GIF được tải từ CDN của Zalo (tối đa `GATEWAY_MAX_FILE_MB`, mặc định 20 MiB) và gửi kèm base64; sticker và link chỉ thành dòng mô tả. File nhân viên gửi đi bằng `sendMessage` với `{data, filename, metadata}`; kích thước ảnh PNG/JPEG/GIF/WebP được đọc từ header nên không cần `sharp`. Lỗi `ZaloApiError` có mã (Zalo từ chối hẳn) trả 422 để gateway không thử lại; lỗi khác trả 502. Stack đầy đủ nằm ở repo `omnichannel`.
 
+### Tin giàu nội dung và sự kiện
+
+`content.mjs` (hàm thuần) chuyển từng loại tin thành dạng Libredesk hiển thị được, dựa trên payload thật ghi lại từ Zalo:
+
+-   Sticker: tra ảnh qua `getStickersDetail` rồi gửi như ảnh đính kèm; doodle tải qua `href`.
+-   Link (`chat.recommended`/`recommened.link`), danh thiếp (`recommened.user`), bình chọn (`group.poll`), vị trí (`chat.location.new`), việc cần làm (`chat.todo`): chữ có biểu tượng.
+-   Trích dẫn (`data.quote`): gửi kèm trường `quote` = `Tên: nội dung`.
+-   `undo`, `reaction`, `group_event`: gửi `POST /v1/event`, thành ghi chú nội bộ; nội dung tin bị thu hồi/được thả cảm xúc lấy từ bộ nhớ 4096 tin gần nhất (khoá `tài khoản:cliMsgId`).
+-   Bot bật `selfListen` để thấy tin chủ tài khoản tự gửi từ điện thoại/ứng dụng khác (ghi chú `owner_message`); tin do bot gửi qua `/send` được nhận ra bằng `msgId` trả về hoặc trùng nội dung trong 60 giây và bỏ qua.
+-   `getGroupChatHistory` của zca-js hiện trả 404 nên không dùng.
+
 ## 🩺 Healthcheck và tài nguyên
 
 -   Trạng thái từng tài khoản (`starting`, `running`, `retrying`, `dropped`) ghi vào `ZALO_HEALTH_FILE`; container `healthy` khi mọi tài khoản là `running`. Healthcheck dùng `grep` để không khởi động thêm tiến trình Node mỗi phút.

@@ -35,6 +35,17 @@ docker compose restart bot
 
 Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer message is forwarded to the gateway (`POST /v1/inbound`), the bot serves `POST /send` on `BOT_HTTP_PORT` (default 7001) for agent replies, and `/ping`-style commands are disabled (`BOT_COMMANDS=1` to keep them). Groups carry the group name (`getGroupInfo`, cached). Images, files, videos, voice notes and GIFs are downloaded from Zalo's CDN (up to `GATEWAY_MAX_FILE_MB`, default 20 MiB) and sent as base64; stickers and links become a one-line description. Agent files go out through `sendMessage` with `{data, filename, metadata}`; PNG/JPEG/GIF/WebP dimensions are read from the header, so `sharp` is not needed. A `ZaloApiError` with a code (Zalo refused the message) returns 422 so the gateway does not retry; other failures return 502. The full stack lives in the `omnichannel` repository.
 
+### Rich content and events
+
+`content.mjs` (pure functions) turns each message type into something Libredesk can show, based on real payloads captured from Zalo:
+
+-   Stickers: the image is looked up through `getStickersDetail` and sent as an image attachment; doodles are downloaded from `href`.
+-   Links (`chat.recommended`/`recommened.link`), contact cards (`recommened.user`), polls (`group.poll`), locations (`chat.location.new`) and to-dos (`chat.todo`): text with an icon.
+-   Quotes (`data.quote`): sent as the `quote` field, `Name: text`.
+-   `undo`, `reaction` and `group_event` go to `POST /v1/event` and become private notes; the recalled/reacted message text comes from a cache of the last 4096 messages (key `account:cliMsgId`).
+-   The bot enables `selfListen` to see messages the owner sends from a phone or another app (`owner_message` notes); messages the bot itself sent through `/send` are recognised by the returned `msgId` or by matching text within 60 seconds and skipped.
+-   zca-js `getGroupChatHistory` currently returns 404, so it is not used.
+
 ## 🩺 Healthcheck and resources
 
 -   Each account's state (`starting`, `running`, `retrying`, `dropped`) is written to `ZALO_HEALTH_FILE`; the container is `healthy` when every account is `running`. The healthcheck uses `grep` so it does not start an extra Node process every minute.

@@ -14,3 +14,4 @@ deploy
 !deploy/login.mjs
 !deploy/bot.mjs
 !deploy/gateway.mjs
+!deploy/content.mjs

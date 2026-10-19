@@ -6,7 +6,8 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { discoverAccounts, isValidCredentials, readCredentials, writePrivateJson } from "../common.mjs";
-import { describeContent, downloadAttachment, imageSize, toAttachmentSource } from "../gateway.mjs";
+import { findCoordinates, groupEventText, quoteText, reactionEmoji, RecentMessages } from "../content.mjs";
+import { describeContent, downloadAttachment, imageSize, isBotEcho, toAttachmentSource } from "../gateway.mjs";
 
 function tempDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), "zalo-deploy-"));
@@ -59,7 +60,7 @@ test("describeContent giữ chữ và mô tả file đính kèm", () => {
         describeContent({ data: { msgType: "chat.photo", content: { title: "", href: "https://x/y.jpg" } } }),
         "[chat.photo] https://x/y.jpg",
     );
-    assert.equal(describeContent({ data: { msgType: "chat.sticker", content: {} } }), "[chat.sticker]");
+    assert.equal(describeContent({ data: { msgType: "chat.sticker", content: {} } }), "[Sticker]");
 });
 
 function png(width, height) {
@@ -118,4 +119,75 @@ test("downloadAttachment bỏ qua sticker và từ chối file quá lớn", asyn
         downloadAttachment(big, fakeFetch("x", { "content-length": String(999 * 1024 * 1024) })),
         /quá lớn/,
     );
+});
+
+// --- Nội dung giàu (payload rút gọn từ tin thật, dữ liệu giả) ---
+
+test("describeContent hiển thị link, danh thiếp, bình chọn, vị trí, sticker", () => {
+    const link = {
+        data: {
+            msgType: "chat.recommended",
+            content: {
+                title: "Xem https://zalo.me",
+                href: "https://zalo.me",
+                description: "Mô tả",
+                action: "recommened.link",
+            },
+        },
+    };
+    assert.equal(describeContent(link), "🔗 Xem https://zalo.me\nMô tả"); // tiêu đề đã chứa URL: không lặp
+    const card = {
+        data: {
+            msgType: "chat.recommended",
+            content: {
+                title: "Nguyễn Văn A",
+                description: '{"qrCodeUrl":"https://qr/x.jpg"}',
+                action: "recommened.user",
+            },
+        },
+    };
+    assert.equal(describeContent(card), "👤 Danh thiếp: Nguyễn Văn A\nMã QR: https://qr/x.jpg");
+    const poll = {
+        data: {
+            msgType: "group.poll",
+            content: { action: "create", params: '{"question":"Ăn gì?","dName":"Bình"}' },
+        },
+    };
+    assert.equal(describeContent(poll), "📊 Bình tạo bình chọn: Ăn gì?");
+    const place = {
+        data: {
+            msgType: "chat.location.new",
+            content: { title: "Quán", params: '{"latitude":10.77,"longitude":106.7}' },
+        },
+    };
+    assert.equal(describeContent(place), "📍 Vị trí: Quán\nhttps://maps.google.com/?q=10.77,106.7");
+    assert.deepEqual(findCoordinates({ params: "not json" }), null);
+    assert.equal(describeContent({ data: { msgType: "chat.sticker", content: { id: 1, catId: 2 } } }), "[Sticker]");
+});
+
+test("quoteText, reactionEmoji và groupEventText", () => {
+    assert.equal(quoteText({ data: { quote: { msg: "giá?", fromD: "An" } } }), "An: giá?");
+    assert.equal(quoteText({ data: { quote: { msg: "", attach: "{...}", fromD: "An" } } }), "An: [Tệp đính kèm]");
+    assert.equal(quoteText({ data: {} }), "");
+    assert.equal(reactionEmoji("/-heart"), "❤️");
+    assert.equal(reactionEmoji("/-unknown"), "/-unknown");
+    assert.equal(groupEventText({ type: "update", data: { groupName: "Nhóm mới" } }), "Nhóm đổi tên thành «Nhóm mới»");
+    assert.equal(
+        groupEventText({ type: "join", data: { updateMembers: [{ dName: "An" }, { dName: "Bình" }] } }),
+        "An, Bình đã vào nhóm",
+    );
+    assert.equal(groupEventText({ type: "update_board", data: {} }), null);
+});
+
+test("RecentMessages giới hạn kích thước theo LRU", () => {
+    const cache = new RecentMessages(2);
+    cache.remember(["a", "b"], 1);
+    cache.remember(["c"], 2);
+    assert.equal(cache.get("a"), undefined);
+    assert.equal(cache.get("c"), 2);
+});
+
+test("isBotEcho bỏ qua tin isSelf vừa được bot gửi, giữ tin chủ tài khoản tự gửi", () => {
+    // Không có tin chờ: tin isSelf là của chủ tài khoản.
+    assert.equal(isBotEcho("acc", { threadId: "t1", data: { msgId: "x1", content: "chào" } }), false);
 });

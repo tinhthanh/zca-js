@@ -9,7 +9,16 @@ import path from "node:path";
 
 import { ThreadType, Zalo } from "../dist/index.js";
 import { CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
-import { forwardMessage, gatewayEnabled, registerAccount, startSendServer, unregisterAccount } from "./gateway.mjs";
+import {
+    forwardGroupEvent,
+    forwardMessage,
+    forwardReaction,
+    forwardUndo,
+    gatewayEnabled,
+    registerAccount,
+    startSendServer,
+    unregisterAccount,
+} from "./gateway.mjs";
 
 const COMMANDS_ENABLED =
     !gatewayEnabled() || ["1", "true", "yes"].includes((process.env.BOT_COMMANDS || "").toLowerCase());
@@ -64,7 +73,8 @@ async function runAccount(name, dir) {
     if (!credentials) throw new Error("credentials.json thiếu hoặc không hợp lệ");
 
     log(name, "boot", "Đang đăng nhập bằng credentials...");
-    const zalo = new Zalo({ checkUpdate: false, logging: false });
+    // selfListen: cần thấy tin chủ tài khoản tự gửi (điện thoại/ứng dụng khác) để ghi chú.
+    const zalo = new Zalo({ checkUpdate: false, logging: false, selfListen: gatewayEnabled() });
     const api = await zalo.login(credentials);
     const { listener } = api;
     if (gatewayEnabled()) await registerAccount(name, api);
@@ -91,6 +101,11 @@ function listenUntilClosed(name, api, listener) {
             if (gatewayEnabled()) void forwardMessage(name, api, message);
             void handleMessage(name, api, message);
         });
+        if (gatewayEnabled()) {
+            listener.on("undo", (undo) => void forwardUndo(name, undo));
+            listener.on("reaction", (reaction) => void forwardReaction(name, reaction));
+            listener.on("group_event", (event) => void forwardGroupEvent(name, event));
+        }
         listener.start({ retryOnClose: true });
     });
 }
