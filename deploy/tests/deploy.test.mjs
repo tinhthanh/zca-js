@@ -14,7 +14,14 @@ import {
     RecentMessages,
     systemNoticeText,
 } from "../content.mjs";
-import { describeContent, downloadAttachment, imageSize, isBotEcho, toAttachmentSource } from "../gateway.mjs";
+import {
+    captionOf,
+    describeContent,
+    downloadAttachment,
+    imageSize,
+    isBotEcho,
+    toAttachmentSource,
+} from "../gateway.mjs";
 
 function tempDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), "zalo-deploy-"));
@@ -84,6 +91,14 @@ function jpeg(width, height) {
     const sof = Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, 3]);
     return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, sof, Buffer.alloc(16)]);
 }
+
+test("captionOf giữ chú thích ảnh/video, bỏ tên file", () => {
+    const of = (msgType, title) => captionOf({ data: { msgType, content: { title } } });
+    assert.equal(of("chat.photo", "ảnh đẹp"), "ảnh đẹp");
+    assert.equal(of("chat.video.msg", "UI-10 video"), "UI-10 video");
+    assert.equal(of("share.file", "bao-gia.pdf"), "");
+    assert.equal(of("chat.voice", ""), "");
+});
 
 test("imageSize đọc PNG, JPEG, GIF và bỏ qua dữ liệu lạ", () => {
     assert.deepEqual(imageSize(png(640, 480)), { width: 640, height: 480 });

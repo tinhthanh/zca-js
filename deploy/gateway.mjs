@@ -36,6 +36,7 @@ const DOWNLOADABLE = {
     "chat.gif": "image",
     "chat.doodle": "image",
 };
+const CAPTIONED = new Set(["chat.photo", "chat.video.msg"]);
 const ECHO_WINDOW_MS = 60_000;
 const OWNER = "Chủ tài khoản";
 const EXT_BY_TYPE = {
@@ -148,6 +149,12 @@ export async function downloadAttachment(message, fetchImpl = fetch) {
 }
 
 /** Chữ + file (đã tải) của một tin; file lỗi thì giữ dòng mô tả. */
+/** Chú thích của ảnh/video nằm trong title; với file/sticker title là tên file hoặc rỗng. */
+export function captionOf(message) {
+    const title = message.data?.content?.title;
+    return CAPTIONED.has(message.data?.msgType) && typeof title === "string" ? title.trim() : "";
+}
+
 async function collect(account, api, message) {
     let text = describeContent(message);
     const attachments = [];
@@ -155,9 +162,7 @@ async function collect(account, api, message) {
         const file = (await downloadAttachment(message)) || (await downloadSticker(api, message));
         if (file) {
             attachments.push(file);
-            // Ảnh có thể kèm chú thích trong title; file/sticker thì không cần chữ.
-            const content = message.data.content;
-            text = message.data.msgType === "chat.photo" && content.title ? content.title : "";
+            text = captionOf(message);
         }
     } catch (error) {
         log(account, "gateway", `Không tải được file đính kèm, gửi mô tả thay thế: ${error.message}`);
