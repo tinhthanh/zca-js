@@ -100,6 +100,13 @@ export function describeContent(message) {
             return joinLines(`✅ Việc cần làm: ${c.title || params.content || ""}`, c.description);
         case "chat.sticker":
             return "[Sticker]";
+        case "chat.webcontent": {
+            // Thẻ "zinstant" (tài khoản ngân hàng...): chỉ có nhãn và link tới thẻ đã render.
+            const label = params.customMsg?.msg?.vi || params.customMsg?.msg?.en || c.title || "Thẻ";
+            const icon = c.action === "zinstant.bankcard" ? "💳" : "🧩";
+            const url = params.pcItem?.data_url || params.item?.data_url;
+            return joinLines(`${icon} ${label.replace(/^\[(.*)\]$/, "$1")}`, url && `Xem thẻ: ${url}`);
+        }
         case "chat.ecard":
             // Thẻ hệ thống (nhắc hẹn, ...): href chỉ là ảnh nền của thẻ.
             return joinLines(`🎴 ${c.title || "Thẻ"}`, c.description);

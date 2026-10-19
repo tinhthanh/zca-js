@@ -182,6 +182,25 @@ test("describeContent hiển thị link, danh thiếp, bình chọn, vị trí, 
         },
     };
     assert.equal(describeContent(ecard), "🎴 ⏰ Họp\nThứ Hai, 19 tháng 10 lúc 23:43");
+    // Thẻ tài khoản ngân hàng (payload thật rút gọn): không có số tài khoản, chỉ nhãn và link.
+    const bank = {
+        data: {
+            msgType: "chat.webcontent",
+            content: {
+                title: "",
+                href: "",
+                action: "zinstant.bankcard",
+                params: JSON.stringify({
+                    pcItem: { data_url: "https://zinst-stc.zadn.vn/static/x?data=html" },
+                    customMsg: { msg: { en: "[Bank account]", vi: "[Tài khoản ngân hàng]" } },
+                }),
+            },
+        },
+    };
+    assert.equal(
+        describeContent(bank),
+        "💳 Tài khoản ngân hàng\nXem thẻ: https://zinst-stc.zadn.vn/static/x?data=html",
+    );
 });
 
 test("quoteText, reactionEmoji và groupEventText", () => {
