@@ -17,6 +17,7 @@ import {
     quoteText,
     reactionEmoji,
     reactionText,
+    reactionIcon,
     RecentMessages,
     summarize,
     systemNoticeText,
@@ -654,4 +655,15 @@ test("closeCause: phân loại mã đóng WebSocket của Zalo", () => {
     assert.match(closeCause(3000).message, /kết nối trùng/);
     assert.equal(closeCause(3003).kind, "platform");
     assert.match(closeCause(4001).message, /mã 4001/);
+});
+
+test("reactionIcon: emoji nhân viên chọn thành mã Zalo, bỏ qua biến thể FE0F", () => {
+    assert.equal(reactionIcon("❤️"), "/-heart");
+    assert.equal(reactionIcon("❤"), "/-heart");
+    assert.equal(reactionIcon("👍"), "/-strong");
+    assert.equal(reactionIcon("😆"), ":>");
+    assert.equal(reactionIcon("😡"), ":-h");
+    assert.equal(reactionIcon(""), "");
+    assert.equal(reactionIcon("🦄"), null);
+    assert.equal(reactionIcon(null), null);
 });

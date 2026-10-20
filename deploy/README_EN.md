@@ -41,6 +41,7 @@ Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer m
 
 - `POST /send` also takes `reply_to` (msgId of a customer message): the bot keeps the data of the last 2048 customer messages to send a native quote (`sendMessage({msg, quote})`, text only). It returns `{"ok": true, "message_ids": [...]}`.
 - `audio/*` files in `attachments` are sent as Zalo **voice messages** (`uploadAttachment` for the URL, then `sendVoice`); if that fails the file is sent as a plain attachment so the customer still gets it. Other files and text go through `sendMessage` as before.
+- `POST /react {account, thread_id, is_group, message_id, emoji}`: an agent reacts to a customer message with `api.addReaction` (❤️ 👍 😆 😮 😢 😡; empty `emoji` removes). It needs the original `msgId` and `cliMsgId` from the message memory (saved to disk, so it survives restarts); 409 when the message is unknown.
 - `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` needs the `cliMsgId` too, taken from the bot hearing its own message (selfListen); before that it answers 409. The `undo` event of that message is not noted twice (the gateway already did).
 
 ### Customer state and messaging first

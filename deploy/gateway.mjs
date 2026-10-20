@@ -16,6 +16,7 @@ import {
     groupEventText,
     quoteText,
     reactionEmoji,
+    reactionIcon,
     reactionText,
     RecentMessages,
     summarize,
@@ -261,6 +262,7 @@ function rememberMessage(account, message) {
         summary: summarize(message),
         sender: message.isSelf ? OWNER : d.dName || "",
         msgId: d.msgId ? String(d.msgId) : "",
+        cliMsgId: d.cliMsgId ? String(d.cliMsgId) : "",
     });
     scheduleRecentSave();
     if (d.msgId) quotable.remember([`${account}:${d.msgId}`], d);
@@ -702,6 +704,36 @@ async function handleRecall(req, res) {
     }
 }
 
+/** Nhân viên thả cảm xúc lên tin khách (gateway gọi POST /react); emoji "" là bỏ cảm xúc. */
+async function handleReact(req, res) {
+    if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
+    const payload = await readJSON(req, res);
+    if (!payload) return;
+    const { account, thread_id: threadId, is_group: isGroup } = payload;
+    const api = apis.get(account);
+    if (!api) return reply(res, 404, "unknown account");
+    const icon = reactionIcon(typeof payload.emoji === "string" ? payload.emoji : null);
+    if (!threadId || !payload.message_id || icon === null) return reply(res, 400, "invalid payload");
+    // addReaction cần cả msgId và cliMsgId của tin gốc: lấy từ tin bot đã nhận.
+    // Bộ nhớ `recent` được lưu xuống đĩa nên vẫn còn sau khi bot khởi động lại.
+    const target = quotable.get(`${account}:${payload.message_id}`) || recent.get(`${account}:${payload.message_id}`);
+    if (!target?.cliMsgId) return reply(res, 409, "Bot không còn nhớ tin này nên không thả cảm xúc được.");
+    try {
+        await api.addReaction(icon, {
+            data: { msgId: String(target.msgId), cliMsgId: String(target.cliMsgId) },
+            threadId: String(threadId),
+            type: isGroup ? ThreadType.Group : ThreadType.User,
+        });
+        log(account, "gateway", icon ? "Nhân viên đã thả cảm xúc." : "Nhân viên đã bỏ cảm xúc.");
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+    } catch (error) {
+        const permanent = isPermanent(error);
+        log(account, "gateway", `❌ Thả cảm xúc thất bại: ${error?.message || error}`);
+        reply(res, permanent ? 422 : 502, permanent ? `Zalo từ chối: ${error?.message || error}` : "react failed");
+    }
+}
+
 /** Số điện thoại Việt Nam -> dạng Zalo tra được ("84..."); null nếu không giống số điện thoại. */
 export function normalizePhone(raw) {
     const digits = String(raw || "").replace(/[\s.()-]/g, "");
@@ -748,6 +780,8 @@ export function startSendServer(extra = null) {
             handleSend(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/resolve") {
             handleResolve(req, res).catch(() => reply(res, 500, "error"));
+        } else if (req.method === "POST" && req.url === "/react") {
+            handleReact(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/recall") {
             handleRecall(req, res).catch(() => reply(res, 500, "error"));
         } else if (extra && req.headers.authorization === `Bearer ${GATEWAY_TOKEN}`) {

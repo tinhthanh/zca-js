@@ -183,6 +183,14 @@ export function reactionEmoji(icon) {
     return REACTION_EMOJI[icon] || icon || "❓";
 }
 
+/** Emoji nhân viên chọn -> mã cảm xúc Zalo; "" (bỏ cảm xúc) giữ nguyên; null nếu Zalo không có. */
+export function reactionIcon(emoji) {
+    if (emoji === "") return "";
+    const bare = (s) => String(s).replace(/\uFE0F/g, "");
+    const hit = Object.entries(REACTION_EMOJI).find(([, e]) => bare(e) === bare(emoji));
+    return hit ? hit[0] : null;
+}
+
 /** Chữ ghi chú cho reaction: emoji (hoặc bỏ cảm xúc) + tin được thả, kèm người gửi tin trong nhóm. */
 export function reactionText(icon, target, isGroup) {
     const action = icon ? reactionEmoji(icon) : "Bỏ cảm xúc";

@@ -41,6 +41,7 @@ docker compose restart bot
 
 - `POST /send` nhận thêm `reply_to` (msgId tin khách): bot nhớ dữ liệu 2048 tin khách gần nhất để gửi trích dẫn thật (`sendMessage({msg, quote})`, chỉ tin chữ). Trả về `{"ok": true, "message_ids": [...]}`.
 - Tệp `audio/*` trong `attachments` được gửi thành **tin thoại** Zalo (`uploadAttachment` lấy URL rồi `sendVoice`); gửi thoại lỗi thì gửi lại dạng tệp để khách vẫn nhận được. Tệp khác và chữ đi qua `sendMessage` như cũ.
+- `POST /react {account, thread_id, is_group, message_id, emoji}`: nhân viên thả cảm xúc lên tin khách bằng `api.addReaction` (❤️ 👍 😆 😮 😢 😡; `emoji` rỗng là bỏ). Cần `msgId` và `cliMsgId` của tin gốc, lấy từ bộ nhớ tin (lưu xuống đĩa nên còn sau khi khởi động lại); không còn nhớ thì trả 409.
 - `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` cần cả `cliMsgId`, lấy từ tin bot tự nghe lại (selfListen); chưa nghe lại thì trả 409. Sự kiện `undo` của chính tin đó không ghi chú lặp (gateway đã ghi).
 
 ### Trạng thái khách và nhắn trước
