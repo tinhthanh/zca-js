@@ -11,6 +11,20 @@ import { ACCOUNTS_DIR, ACCOUNT_NAME_PATTERN, CREDENTIALS_FILE, log, writePrivate
 const MAX_QR = Number(process.env.MAX_QR || 5); // mỗi mã QR sống ~100 giây
 const SESSION_KEEP_MS = 10 * 60 * 1000; // giữ kết quả để giao diện kịp đọc
 
+export const SESSION_EXPIRED_MESSAGE = "Phiên Zalo đã hết hạn hoặc bị đăng xuất: cần đăng nhập lại.";
+
+/** Đánh dấu lỗi là "hết phiên" (cần quét QR lại), không phải lỗi kết nối. */
+export function sessionExpired(error) {
+    error.sessionExpired = true;
+    return error;
+}
+
+/** Lỗi gần nhất cho trang Channel accounts: {kind, message}. */
+export function describeAccountError(error) {
+    if (error?.sessionExpired) return { kind: "session_expired", message: SESSION_EXPIRED_MESSAGE };
+    return { kind: "connection", message: `Lỗi kết nối: ${error?.message || error}`.slice(0, 200) };
+}
+
 /** Phiên đăng nhập QR của một tài khoản (chỉ trong RAM). */
 export class LoginSession {
     constructor(account) {

@@ -43,7 +43,7 @@ Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) c
 
 | Route | Việc |
 |---|---|
-| `GET /accounts` | Danh sách tài khoản: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), phiên đăng nhập đang có |
+| `GET /accounts` | Danh sách tài khoản: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (lỗi gần nhất: `session_expired` khi Zalo từ chối credentials, cần quét QR lại; `connection` cho lỗi khác), phiên đăng nhập đang có |
 | `POST /accounts/<tên>/login` | Bắt đầu đăng nhập QR ngay trong bot (tối đa `MAX_QR` mã) |
 | `GET /accounts/<tên>/login` | Trạng thái: `qr` (kèm ảnh `data:image/png`), `scanned`, `confirming`, `success`, `error` |
 | `POST /accounts/<tên>/restart` | Kết nối lại |

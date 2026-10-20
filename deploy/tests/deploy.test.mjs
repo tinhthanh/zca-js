@@ -19,7 +19,13 @@ import {
     RecentMessages,
     systemNoticeText,
 } from "../content.mjs";
-import { accountRoutes, LoginSession } from "../accounts.mjs";
+import {
+    accountRoutes,
+    describeAccountError,
+    LoginSession,
+    SESSION_EXPIRED_MESSAGE,
+    sessionExpired,
+} from "../accounts.mjs";
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
 import {
     captionOf,
@@ -468,4 +474,16 @@ test("accountRoutes: danh sách, đăng nhập QR lưu credentials rồi chạy 
     assert.equal((await call("DELETE", "/accounts/new1")).status, 204);
     assert.equal(fs.existsSync(path.join(dir, "new1")), false);
     fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("describeAccountError: hết phiên cần quét QR lại, còn lại là lỗi kết nối", () => {
+    assert.deepEqual(describeAccountError(sessionExpired(new Error("bị từ chối"))), {
+        kind: "session_expired",
+        message: SESSION_EXPIRED_MESSAGE,
+    });
+    assert.deepEqual(describeAccountError(new Error("fetch failed")), {
+        kind: "connection",
+        message: "Lỗi kết nối: fetch failed",
+    });
+    assert.equal(describeAccountError(new Error("x".repeat(500))).message.length, 200);
 });

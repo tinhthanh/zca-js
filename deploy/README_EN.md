@@ -43,7 +43,7 @@ With the gateway enabled, the bot's HTTP server (same `GATEWAY_TOKEN` as `/send`
 
 | Route | Action |
 |---|---|
-| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), current sign-in session |
+| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (last error: `session_expired` when Zalo rejects the credentials, scan a QR again; `connection` otherwise), current sign-in session |
 | `POST /accounts/<name>/login` | Start a QR sign-in inside the bot (up to `MAX_QR` codes) |
 | `GET /accounts/<name>/login` | Status: `qr` (with a `data:image/png` image), `scanned`, `confirming`, `success`, `error` |
 | `POST /accounts/<name>/restart` | Reconnect |

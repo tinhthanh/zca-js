@@ -7,9 +7,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { ThreadType, Zalo } from "../dist/index.js";
+import { ThreadType, Zalo, ZaloApiError } from "../dist/index.js";
 import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
-import { accountRoutes } from "./accounts.mjs";
+import { accountRoutes, describeAccountError, sessionExpired } from "./accounts.mjs";
 import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
 import {
     forwardFriendEvent,
@@ -35,6 +35,7 @@ const STABLE_AFTER_MS = 600_000;
 
 const accountStates = {};
 const accountProfiles = {}; // name -> {uid, displayName, avatar}: hiển thị trên giao diện
+const accountErrors = {}; // name -> {kind, message}: lỗi gần nhất (cần đăng nhập lại hay lỗi kết nối)
 const running = new Map(); // name -> {stopped, listener, abort}
 
 function setAccountState(name, value) {
@@ -76,12 +77,18 @@ async function handleMessage(name, api, message) {
 /** Đăng nhập và chạy listener tới khi kết nối đóng hẳn (reject) hoặc bị dừng. */
 async function runAccount(name, dir, ctl) {
     const credentials = readCredentials(path.join(dir, CREDENTIALS_FILE));
-    if (!credentials) throw new Error("credentials.json thiếu hoặc không hợp lệ");
+    if (!credentials) throw sessionExpired(new Error("credentials.json thiếu hoặc không hợp lệ"));
 
     log(name, "boot", "Đang đăng nhập bằng credentials...");
     // selfListen: cần thấy tin chủ tài khoản tự gửi (điện thoại/ứng dụng khác) để ghi chú.
     const zalo = new Zalo({ checkUpdate: false, logging: false, selfListen: gatewayEnabled() });
-    const api = await zalo.login(credentials);
+    let api;
+    try {
+        api = await zalo.login(credentials);
+    } catch (error) {
+        // Zalo từ chối hẳn (có mã lỗi): cookie hết hạn/bị đăng xuất. Lỗi mạng thì không.
+        throw error instanceof ZaloApiError ? sessionExpired(error) : error;
+    }
     const { listener } = api;
     ctl.listener = listener;
     if (ctl.stopped) return;
@@ -111,6 +118,7 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
         // stopAccount: listener.stop() không chắc phát "closed", nên kết thúc trực tiếp.
         ctl.abort = resolve;
         listener.on("connected", () => {
+            delete accountErrors[name];
             setAccountState(name, "running");
             log(name, "bot", "Listener đã kết nối.");
         });
@@ -165,6 +173,7 @@ async function superviseAccount(name, dir, ctl) {
             return true;
         } catch (error) {
             if (ctl.stopped) return true;
+            accountErrors[name] = describeAccountError(error);
             attempt = Date.now() - started >= STABLE_AFTER_MS ? 1 : attempt + 1;
             if (attempt >= MAX_ATTEMPTS) {
                 setAccountState(name, "dropped");
@@ -204,6 +213,7 @@ async function stopAccount(name) {
     unregisterAccount(name);
     setAccountState(name, null);
     delete accountProfiles[name];
+    delete accountErrors[name];
     log(name, "multi", "Đã dừng tài khoản.");
 }
 
@@ -214,6 +224,7 @@ const manager = {
             name,
             state: accountStates[name] || "stopped",
             profile: accountProfiles[name] || null,
+            error: accountErrors[name] || null,
         }));
     },
     stop: stopAccount,
