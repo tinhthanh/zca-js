@@ -31,6 +31,7 @@ import {
 } from "../accounts.mjs";
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
 import { watchSocket } from "../watchdog.mjs";
+import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
     captionOf,
     describeContent,
@@ -482,10 +483,11 @@ test("accountRoutes: danh sách, đăng nhập QR lưu credentials rồi chạy 
 });
 
 test("describeAccountError: hết phiên cần quét QR lại, còn lại là lỗi kết nối", () => {
-    assert.deepEqual(describeAccountError(sessionExpired(new Error("bị từ chối"))), {
-        kind: "session_expired",
-        message: SESSION_EXPIRED_MESSAGE,
-    });
+    const expired = describeAccountError(sessionExpired(new Error("bị từ chối")));
+    assert.equal(expired.kind, "session_expired");
+    assert.ok(expired.message.startsWith(`${SESSION_EXPIRED_MESSAGE} Nguyên nhân: `));
+    const rejected = Object.assign(sessionExpired(new Error("x")), { sessionCause: "Zalo từ chối đăng nhập (mã 2)" });
+    assert.match(describeAccountError(rejected).message, /Nguyên nhân: Zalo từ chối đăng nhập \(mã 2\)$/);
     assert.deepEqual(describeAccountError(new Error("fetch failed")), {
         kind: "connection",
         message: "Lỗi kết nối: fetch failed",
@@ -623,4 +625,33 @@ test("RecentMessages: entries/restore giữ thứ tự và bỏ dữ liệu hỏ
     b.restore("hỏng");
     b.restore([null, [1, 2]]);
     assert.deepEqual(b.entries(), a.entries());
+});
+
+test("ConnectionHistory: gộp mốc trùng, lưu file 0600, đọc lại sau khởi động", () => {
+    const file = path.join(tempDir(), "acc", "history.json");
+    let t = Date.parse("2026-10-20T10:00:00Z");
+    const now = () => new Date(t);
+    const h = new ConnectionHistory(file, now);
+    h.record("connected", "Đã kết nối");
+    t += 60_000;
+    h.record("network", "mất mạng");
+    t += 60_000;
+    h.record("network", "mất mạng");
+    const again = new ConnectionHistory(file).list();
+    assert.deepEqual(
+        again.map((i) => i.kind),
+        ["network", "connected"],
+    );
+    assert.equal(again[0].count, 2);
+    assert.equal(again[0].last_at, "2026-10-20T10:02:00Z");
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    fs.writeFileSync(file, "{hỏng");
+    assert.deepEqual(new ConnectionHistory(file).list(), []);
+});
+
+test("closeCause: phân loại mã đóng WebSocket của Zalo", () => {
+    assert.equal(closeCause(1006).kind, "network");
+    assert.match(closeCause(3000).message, /kết nối trùng/);
+    assert.equal(closeCause(3003).kind, "platform");
+    assert.match(closeCause(4001).message, /mã 4001/);
 });

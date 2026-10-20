@@ -18,3 +18,4 @@ deploy
 !deploy/catchup.mjs
 !deploy/accounts.mjs
 !deploy/watchdog.mjs
+!deploy/history.mjs

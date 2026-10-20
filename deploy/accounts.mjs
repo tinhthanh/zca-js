@@ -35,7 +35,10 @@ export function retryDelay(error, attempt) {
 
 /** Lỗi gần nhất cho trang Channel accounts: {kind, message}. */
 export function describeAccountError(error) {
-    if (error?.sessionExpired) return { kind: "session_expired", message: SESSION_EXPIRED_MESSAGE };
+    if (error?.sessionExpired) {
+        const cause = error.sessionCause || "credentials đã lưu không đọc được.";
+        return { kind: "session_expired", message: `${SESSION_EXPIRED_MESSAGE} Nguyên nhân: ${cause}` };
+    }
     return { kind: "connection", message: `Lỗi kết nối: ${error?.message || error}`.slice(0, 200) };
 }
 

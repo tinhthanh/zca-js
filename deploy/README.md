@@ -54,7 +54,7 @@ Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) c
 
 | Route | Việc |
 |---|---|
-| `GET /accounts` | Danh sách tài khoản: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (lỗi gần nhất: `session_expired` khi Zalo từ chối credentials, cần quét QR lại; `connection` cho lỗi khác), phiên đăng nhập đang có |
+| `GET /accounts` | Danh sách tài khoản: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (lỗi gần nhất: `session_expired` khi Zalo từ chối credentials, cần quét QR lại; `connection` cho lỗi khác; hết phiên thì `message` kèm "Nguyên nhân: …" và mã lỗi Zalo), `history` (lịch sử kết nối, mới nhất trước: `at`, `kind` `connected`/`manual`/`network`/`disconnected`/`platform`/`session_expired`, `message`, `count`/`last_at`; mã đóng 1006 = mạng, 3000 = kết nối trùng Zalo Web/PC, 3003 = Zalo ngắt; watchdog cắt socket im lặng ghi `network`; lưu `<tài khoản>/history.json` 0600, tối đa 30 mốc), phiên đăng nhập đang có |
 | `POST /accounts/<tên>/login` | Bắt đầu đăng nhập QR ngay trong bot (tối đa `MAX_QR` mã) |
 | `GET /accounts/<tên>/login` | Trạng thái: `qr` (kèm ảnh `data:image/png`), `scanned`, `confirming`, `success`, `error` |
 | `POST /accounts/<tên>/restart` | Kết nối lại |

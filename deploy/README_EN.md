@@ -54,7 +54,7 @@ With the gateway enabled, the bot's HTTP server (same `GATEWAY_TOKEN` as `/send`
 
 | Route | Action |
 |---|---|
-| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (last error: `session_expired` when Zalo rejects the credentials, scan a QR again; `connection` otherwise), current sign-in session |
+| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), `error` (last error: `session_expired` when Zalo rejects the credentials, scan a QR again; `connection` otherwise; on expiry `message` adds "Nguyên nhân: …" with the Zalo error code), `history` (connection history, newest first: `at`, `kind` `connected`/`manual`/`network`/`disconnected`/`platform`/`session_expired`, `message`, `count`/`last_at`; close code 1006 = network, 3000 = duplicate Zalo Web/PC connection, 3003 = kicked by Zalo; the watchdog cutting a silent socket is `network`; saved in `<account>/history.json` 0600, at most 30 entries), current sign-in session |
 | `POST /accounts/<name>/login` | Start a QR sign-in inside the bot (up to `MAX_QR` codes) |
 | `GET /accounts/<name>/login` | Status: `qr` (with a `data:image/png` image), `scanned`, `confirming`, `success`, `error` |
 | `POST /accounts/<name>/restart` | Reconnect |

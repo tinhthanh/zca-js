@@ -10,6 +10,7 @@ import path from "node:path";
 import { ThreadType, Zalo, ZaloApiError } from "../dist/index.js";
 import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
 import { watchSocket } from "./watchdog.mjs";
+import { closeCause, ConnectionHistory, HISTORY_FILE } from "./history.mjs";
 import { accountRoutes, describeAccountError, retryDelay, sessionExpired } from "./accounts.mjs";
 import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
 import {
@@ -92,7 +93,11 @@ async function runAccount(name, dir, ctl) {
         api = await zalo.login(credentials);
     } catch (error) {
         // Zalo từ chối hẳn (có mã lỗi): cookie hết hạn/bị đăng xuất. Lỗi mạng thì không.
-        throw error instanceof ZaloApiError ? sessionExpired(error) : error;
+        if (!(error instanceof ZaloApiError)) throw error;
+        error.sessionCause =
+            `Zalo từ chối đăng nhập${error.code ? ` (mã ${error.code})` : ""}: ` +
+            "tài khoản đã đăng xuất bot trên điện thoại (Quản lý thiết bị), đổi mật khẩu hoặc phiên quá hạn.";
+        throw sessionExpired(error);
     }
     const { listener } = api;
     ctl.listener = listener;
@@ -128,16 +133,22 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
         };
         listener.on("connected", () => {
             delete accountErrors[name];
+            historyOf(name).record("connected", "Đã kết nối");
             // Kết nối chết không có gói đóng (mất mạng): tự phát hiện bằng ping/pong.
             stopWatchdog();
             stopWatchdog = watchSocket(listener.ws, {
                 staleMs: WATCHDOG_STALE_MS,
-                onDead: (ms) =>
+                onDead: (ms) => {
                     log(
                         name,
                         "bot",
                         `Không nhận được gì từ Zalo trong ${Math.round(ms / 1000)}s, đóng kết nối để nối lại.`,
-                    ),
+                    );
+                    historyOf(name).record(
+                        "network",
+                        `Không nhận được dữ liệu từ Zalo trong ${Math.round(ms / 60000)} phút (mạng treo), bot tự nối lại.`,
+                    );
+                },
                 onGap: WATCHDOG_OBSERVE
                     ? (ms) => log(name, "watchdog", `khoảng lặng dài nhất ${Math.round(ms / 1000)}s`)
                     : undefined,
@@ -147,11 +158,18 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
         });
         listener.on("disconnected", (code) => {
             stopWatchdog();
+            const cause = closeCause(code);
+            historyOf(name).record(cause.kind, cause.message);
             log(name, "bot", `Mất kết nối (code ${code}), listener tự thử lại.`);
         });
         listener.on("closed", (code, reason) => {
             stopWatchdog();
-            reject(new Error(`listener đóng (code ${code}${reason ? `: ${reason}` : ""})`));
+            // "disconnected" đã ghi nguyên nhân vào lịch sử: không ghi lặp.
+            reject(
+                Object.assign(new Error(`listener đóng (code ${code}${reason ? `: ${reason}` : ""})`), {
+                    recorded: true,
+                }),
+            );
         });
         listener.on("error", (error) => log(name, "bot", `Lỗi listener: ${error?.message || error}`));
         listener.on("message", (message) => {
@@ -192,6 +210,15 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
     });
 }
 
+// tên tài khoản -> lịch sử kết nối (đọc lại từ file khi cần).
+const histories = new Map();
+function historyOf(name) {
+    if (!histories.has(name)) {
+        histories.set(name, new ConnectionHistory(path.join(ACCOUNTS_DIR, name, HISTORY_FILE)));
+    }
+    return histories.get(name);
+}
+
 async function superviseAccount(name, dir, ctl) {
     let attempt = 0;
     while (!ctl.stopped) {
@@ -203,6 +230,9 @@ async function superviseAccount(name, dir, ctl) {
         } catch (error) {
             if (ctl.stopped) return true;
             accountErrors[name] = describeAccountError(error);
+            if (error?.sessionExpired) historyOf(name).record("session_expired", accountErrors[name].message);
+            else if (!error?.recorded)
+                historyOf(name).record("network", `Không kết nối được Zalo: ${error.message}`.slice(0, 200));
             attempt = Date.now() - started >= STABLE_AFTER_MS ? 1 : attempt + 1;
             // Hết phiên: thử lại một lần rồi dừng, chờ quét QR lại. Mất mạng: thử mãi.
             const delay = retryDelay(error, attempt);
@@ -244,6 +274,7 @@ async function stopAccount(name) {
     setAccountState(name, null);
     delete accountProfiles[name];
     delete accountErrors[name];
+    histories.delete(name);
     log(name, "multi", "Đã dừng tài khoản.");
 }
 
@@ -255,11 +286,13 @@ const manager = {
             state: accountStates[name] || "stopped",
             profile: accountProfiles[name] || null,
             error: accountErrors[name] || null,
+            history: historyOf(name).list(),
         }));
     },
     stop: stopAccount,
     restart: async (name) => {
         await stopAccount(name);
+        historyOf(name).record("manual", "Khởi động lại tài khoản (đăng nhập lại hoặc bấm Kết nối lại)");
         void startAccount(name);
     },
 };
