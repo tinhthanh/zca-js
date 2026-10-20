@@ -260,6 +260,7 @@ function rememberMessage(account, message) {
     recent.remember([`${account}:${d.cliMsgId}`, `${account}:${d.msgId}`], {
         summary: summarize(message),
         sender: message.isSelf ? OWNER : d.dName || "",
+        msgId: d.msgId ? String(d.msgId) : "",
     });
     scheduleRecentSave();
     if (d.msgId) quotable.remember([`${account}:${d.msgId}`], d);
@@ -388,7 +389,10 @@ export async function forwardReaction(account, api, reaction) {
     // Gateway gắn cảm xúc lên đúng tin trong Libredesk (như Zalo); không tìm được tin thì ghi chú `text`.
     const icon = d.content?.rIcon;
     await postEvent(account, reaction.threadId, Boolean(reaction.isGroup), "reaction", who, text, d.msgId, [], {
-        target_ids: [ref.gMsgID, ref.cMsgID].filter(Boolean).map(String),
+        // Ứng dụng Zalo trên điện thoại chỉ gửi cMsgID: thêm msgId đã nhớ (gateway nối theo msgId).
+        target_ids: [...new Set([target?.msgId, ref.gMsgID, ref.cMsgID].map((id) => String(id || "")))].filter(
+            (id) => id && id !== "0",
+        ),
         reactor_id: reaction.isSelf ? "self" : String(d.uidFrom || who),
         reaction: icon ? reactionEmoji(icon) : "",
     });
