@@ -15,6 +15,7 @@ import {
     friendEventInfo,
     groupEventText,
     quoteText,
+    reactionEmoji,
     reactionText,
     RecentMessages,
     summarize,
@@ -287,9 +288,10 @@ export function isBotEcho(account, message, now = Date.now()) {
     return true;
 }
 
-async function postEvent(account, threadId, isGroup, kind, senderName, text, messageId, attachments = []) {
+async function postEvent(account, threadId, isGroup, kind, senderName, text, messageId, attachments = [], extra = {}) {
     try {
         await callGateway("/v1/event", {
+            ...extra,
             channel: CHANNEL,
             account,
             thread_id: String(threadId),
@@ -383,7 +385,13 @@ export async function forwardReaction(account, api, reaction) {
         ? OWNER
         : d.dName || (await threadProfile(account, api, { data: { uidFrom: d.uidFrom } }, false)).name;
     const text = reactionText(d.content?.rIcon, target, Boolean(reaction.isGroup));
-    await postEvent(account, reaction.threadId, Boolean(reaction.isGroup), "reaction", who, text, d.msgId);
+    // Gateway gắn cảm xúc lên đúng tin trong Libredesk (như Zalo); không tìm được tin thì ghi chú `text`.
+    const icon = d.content?.rIcon;
+    await postEvent(account, reaction.threadId, Boolean(reaction.isGroup), "reaction", who, text, d.msgId, [], {
+        target_ids: [ref.gMsgID, ref.cMsgID].filter(Boolean).map(String),
+        reactor_id: reaction.isSelf ? "self" : String(d.uidFrom || who),
+        reaction: icon ? reactionEmoji(icon) : "",
+    });
 }
 
 /** Sự kiện nhóm đáng chú ý (đổi tên, vào/ra, phó nhóm, cài đặt...) thành ghi chú. */
