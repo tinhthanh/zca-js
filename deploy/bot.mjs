@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { ThreadType, Zalo, ZaloApiError } from "../dist/index.js";
 import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
+import { watchSocket } from "./watchdog.mjs";
 import { accountRoutes, describeAccountError, retryDelay, sessionExpired } from "./accounts.mjs";
 import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
 import {
@@ -31,6 +32,9 @@ const COMMANDS_ENABLED =
 const PREFIX = process.env.BOT_PREFIX || "/";
 const HEALTH_FILE = process.env.ZALO_HEALTH_FILE;
 const STABLE_AFTER_MS = 600_000;
+// Watchdog kết nối (watchdog.mjs): 0 = tắt. ZALO_WATCHDOG_OBSERVE=1 chỉ ghi khoảng lặng.
+const WATCHDOG_OBSERVE = process.env.ZALO_WATCHDOG_OBSERVE === "1";
+const WATCHDOG_STALE_MS = WATCHDOG_OBSERVE ? Infinity : Number(process.env.ZALO_WATCHDOG_STALE_MS || 0);
 
 const accountStates = {};
 const accountProfiles = {}; // name -> {uid, displayName, avatar}: hiển thị trên giao diện
@@ -115,14 +119,36 @@ async function runAccount(name, dir, ctl) {
 function listenUntilClosed(name, api, listener, catchUp, ctl) {
     return new Promise((resolve, reject) => {
         // stopAccount: listener.stop() không chắc phát "closed", nên kết thúc trực tiếp.
-        ctl.abort = resolve;
+        let stopWatchdog = () => {};
+        ctl.abort = () => {
+            stopWatchdog();
+            resolve();
+        };
         listener.on("connected", () => {
             delete accountErrors[name];
+            // Kết nối chết không có gói đóng (mất mạng): tự phát hiện bằng ping/pong.
+            stopWatchdog();
+            stopWatchdog = watchSocket(listener.ws, {
+                staleMs: WATCHDOG_STALE_MS,
+                onDead: (ms) =>
+                    log(
+                        name,
+                        "bot",
+                        `Không nhận được gì từ Zalo trong ${Math.round(ms / 1000)}s, đóng kết nối để nối lại.`,
+                    ),
+                onGap: WATCHDOG_OBSERVE
+                    ? (ms) => log(name, "watchdog", `khoảng lặng dài nhất ${Math.round(ms / 1000)}s`)
+                    : undefined,
+            });
             setAccountState(name, "running");
             log(name, "bot", "Listener đã kết nối.");
         });
-        listener.on("disconnected", (code) => log(name, "bot", `Mất kết nối (code ${code}), listener tự thử lại.`));
+        listener.on("disconnected", (code) => {
+            stopWatchdog();
+            log(name, "bot", `Mất kết nối (code ${code}), listener tự thử lại.`);
+        });
         listener.on("closed", (code, reason) => {
+            stopWatchdog();
             reject(new Error(`listener đóng (code ${code}${reason ? `: ${reason}` : ""})`));
         });
         listener.on("error", (error) => log(name, "bot", `Lỗi listener: ${error?.message || error}`));

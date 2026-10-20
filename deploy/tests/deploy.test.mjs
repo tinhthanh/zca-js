@@ -28,6 +28,7 @@ import {
     sessionExpired,
 } from "../accounts.mjs";
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
+import { watchSocket } from "../watchdog.mjs";
 import {
     captionOf,
     describeContent,
@@ -40,6 +41,7 @@ import {
     forwardSeen,
     forwardTyping,
     normalizePhone,
+    splitVoices,
 } from "../gateway.mjs";
 
 function tempDir() {
@@ -540,4 +542,55 @@ test("retryDelay: mất mạng thử mãi (tối đa 2 phút), hết phiên dừ
     const expired = sessionExpired(new Error("bị từ chối"));
     assert.equal(retryDelay(expired, 1), 30_000);
     assert.equal(retryDelay(expired, 2), null);
+});
+
+test("watchSocket: cắt kết nối khi im lặng quá lâu, giữ nguyên khi còn nhận frame", async () => {
+    const { EventEmitter } = await import("node:events");
+    const fakeSocket = () => {
+        const ws = new EventEmitter();
+        ws.readyState = 1;
+        ws.terminated = false;
+        ws.terminate = () => {
+            ws.terminated = true;
+            ws.readyState = 3;
+        };
+        return ws;
+    };
+    let clock = 0;
+    const now = () => clock;
+    const alive = fakeSocket();
+    const dead = fakeSocket();
+    let deadReported = 0;
+    const gaps = [];
+    const stopAlive = watchSocket(alive, { staleMs: 100, checkMs: 5, now, onGap: (ms) => gaps.push(ms) });
+    watchSocket(dead, { staleMs: 100, checkMs: 5, now, onDead: () => deadReported++ });
+    for (let i = 0; i < 6; i++) {
+        clock += 60;
+        alive.emit("message", "frame");
+        await new Promise((r) => setTimeout(r, 15));
+    }
+    stopAlive();
+    assert.equal(alive.terminated, false);
+    assert.equal(dead.terminated, true);
+    assert.equal(deadReported, 1);
+    assert.ok(gaps.length > 0 && Math.max(...gaps) === 60);
+    assert.doesNotThrow(() => watchSocket(null, { staleMs: 1 })()); // socket chưa có: bỏ qua
+    assert.doesNotThrow(() => watchSocket(alive, { staleMs: 0 })()); // tắt: không theo dõi
+});
+
+test("splitVoices: audio thành tin thoại, tệp khác gửi kèm", () => {
+    const b64 = Buffer.from("x").toString("base64");
+    const { voices, files } = splitVoices([
+        { name: "ghi-am.m4a", content_type: "audio/mp4", data: b64 },
+        { name: "anh.jpg", content_type: "image/jpeg", data: b64 },
+        { name: "rong.pdf", content_type: "application/pdf", data: "" },
+    ]);
+    assert.deepEqual(
+        voices.map((v) => v.filename),
+        ["ghi-am.m4a"],
+    );
+    assert.deepEqual(
+        files.map((f) => f.filename),
+        ["anh.jpg"],
+    );
 });

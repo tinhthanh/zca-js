@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --ignore-scripts \
     && mkdir -p /data \
     && chown node:node /data
 COPY --from=build /src/dist ./dist
-COPY deploy/common.mjs deploy/login.mjs deploy/bot.mjs deploy/gateway.mjs deploy/content.mjs deploy/catchup.mjs deploy/accounts.mjs ./deploy/
+COPY deploy/common.mjs deploy/login.mjs deploy/bot.mjs deploy/gateway.mjs deploy/content.mjs deploy/catchup.mjs deploy/accounts.mjs deploy/watchdog.mjs ./deploy/
 
 USER node
 ENV NODE_ENV=production \

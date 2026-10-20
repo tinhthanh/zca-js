@@ -40,6 +40,7 @@ docker compose restart bot
 ### Trích dẫn và thu hồi tin nhân viên
 
 - `POST /send` nhận thêm `reply_to` (msgId tin khách): bot nhớ dữ liệu 2048 tin khách gần nhất để gửi trích dẫn thật (`sendMessage({msg, quote})`, chỉ tin chữ). Trả về `{"ok": true, "message_ids": [...]}`.
+- Tệp `audio/*` trong `attachments` được gửi thành **tin thoại** Zalo (`uploadAttachment` lấy URL rồi `sendVoice`); gửi thoại lỗi thì gửi lại dạng tệp để khách vẫn nhận được. Tệp khác và chữ đi qua `sendMessage` như cũ.
 - `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` cần cả `cliMsgId`, lấy từ tin bot tự nghe lại (selfListen); chưa nghe lại thì trả 409. Sự kiện `undo` của chính tin đó không ghi chú lặp (gateway đã ghi).
 
 ### Trạng thái khách và nhắn trước
@@ -80,7 +81,7 @@ Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) c
 ## 🩺 Healthcheck và tài nguyên
 
 -   Trạng thái từng tài khoản (`starting`, `running`, `retrying`, `dropped`) ghi vào `ZALO_HEALTH_FILE`; container `healthy` khi mọi tài khoản là `running`. Healthcheck dùng `grep` để không khởi động thêm tiến trình Node mỗi phút.
--   Tài khoản lỗi thử lại với backoff (30 giây, nhân đôi). Chỉ phiên hết hạn thật (Zalo từ chối credentials) mới dừng sau 2 lần; mất mạng thì thử lại mãi, tối đa mỗi 2 phút, có mạng lại là tự kết nối; khi mọi tài khoản bị bỏ, tiến trình vẫn chạy để không lặp lại đăng nhập hỏng.
+-   Tài khoản lỗi thử lại với backoff (30 giây, nhân đôi). Chỉ phiên hết hạn thật (Zalo từ chối credentials) mới dừng sau 2 lần; mất mạng thì thử lại mãi, tối đa mỗi 2 phút, có mạng lại là tự kết nối. Socket chết mà không báo đóng (mất mạng giữa chừng) được phát hiện bằng watchdog: không nhận frame nào trong `ZALO_WATCHDOG_STALE_MS` (compose mặc định 360000 = 6 phút; Zalo trả ping ứng dụng khoảng 3 phút/lần; 0 = tắt) thì cắt và nối lại. `ZALO_WATCHDOG_OBSERVE=1` chỉ ghi khoảng lặng dài nhất mỗi 15 giây để đo trước khi đổi ngưỡng; khi mọi tài khoản bị bỏ, tiến trình vẫn chạy để không lặp lại đăng nhập hỏng.
 -   Đo lúc rảnh: 1 tài khoản ~27 MiB, mỗi tài khoản thêm ~8-10 MiB; trang login ~30 MiB. Image 172 MB.
 
 ## 🧪 Test

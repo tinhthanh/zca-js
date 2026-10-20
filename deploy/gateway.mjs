@@ -498,6 +498,32 @@ export function toAttachmentSource(file) {
     return { data, filename: name, metadata };
 }
 
+/** Tách tệp audio (gửi thành tin thoại) khỏi tệp thường; bỏ tệp rỗng. */
+export function splitVoices(rawFiles) {
+    const voices = [];
+    const files = [];
+    for (const raw of rawFiles) {
+        const source = toAttachmentSource(raw);
+        if (!source) continue;
+        if (String(raw?.content_type || "").startsWith("audio/")) voices.push(source);
+        else files.push(source);
+    }
+    return { voices, files };
+}
+
+/** Tin thoại: tải lên lấy URL rồi sendVoice; lỗi thì gửi như tệp để khách vẫn nhận được. */
+async function sendVoiceOrFile(api, source, threadId, type, account) {
+    try {
+        const [uploaded] = await api.uploadAttachment(source, threadId, type);
+        if (!uploaded?.fileUrl) throw new Error("upload không trả URL");
+        return (await api.sendVoice({ voiceUrl: uploaded.fileUrl }, threadId, type))?.msgId;
+    } catch (error) {
+        log(account, "gateway", `Không gửi được tin thoại (${error?.message || error}), gửi dạng tệp.`);
+        const result = await api.sendMessage({ msg: "", attachments: [source] }, threadId, type);
+        return (result?.attachment || [])[0]?.msgId;
+    }
+}
+
 /** Lỗi Zalo có mã (tham số sai, bị chặn...) là vĩnh viễn: thử lại vô ích. */
 function isPermanent(error) {
     return error instanceof ZaloApiError && error.code != null;
@@ -520,26 +546,32 @@ async function handleSend(req, res) {
     }
     const { account, thread_id: threadId, is_group: isGroup, message_id: messageId } = payload;
     const text = typeof payload.text === "string" ? payload.text : "";
-    const attachments = (Array.isArray(payload.attachments) ? payload.attachments : [])
-        .map(toAttachmentSource)
-        .filter(Boolean);
+    // Audio thành tin thoại Zalo (sendVoice); tệp khác gửi kèm như cũ.
+    const { voices, files: attachments } = splitVoices(Array.isArray(payload.attachments) ? payload.attachments : []);
     const api = apis.get(account);
     if (!api) return reply(res, 404, "unknown account");
-    if (!threadId || (!text.trim() && attachments.length === 0)) return reply(res, 400, "invalid payload");
+    if (!threadId || (!text.trim() && attachments.length === 0 && voices.length === 0)) {
+        return reply(res, 400, "invalid payload");
+    }
     if (rememberReply(messageId)) return reply(res, 200, "duplicate");
     const echo = {
         account,
         threadId: String(threadId),
         text,
-        files: attachments.length,
+        files: attachments.length + voices.length,
         until: Date.now() + ECHO_WINDOW_MS,
     };
     pendingEchoes.push(echo);
     try {
         const quote = payload.reply_to ? quotable.get(`${account}:${payload.reply_to}`) : undefined;
-        const content = sendContent(text, attachments, quote);
-        const result = await api.sendMessage(content, String(threadId), isGroup ? ThreadType.Group : ThreadType.User);
-        const ids = [result?.message?.msgId, ...(result?.attachment || []).map((a) => a?.msgId)].filter(Boolean);
+        const type = isGroup ? ThreadType.Group : ThreadType.User;
+        const ids = [];
+        if (text.trim() || attachments.length) {
+            const result = await api.sendMessage(sendContent(text, attachments, quote), String(threadId), type);
+            ids.push(result?.message?.msgId, ...(result?.attachment || []).map((a) => a?.msgId));
+        }
+        for (const voice of voices) ids.push(await sendVoiceOrFile(api, voice, String(threadId), type, account));
+        ids.splice(0, ids.length, ...ids.filter(Boolean));
         botSent.remember(
             ids.map((id) => `${account}:${id}`),
             true,
@@ -547,7 +579,7 @@ async function handleSend(req, res) {
         log(
             account,
             "gateway",
-            `Đã gửi tin trả lời của nhân viên${attachments.length ? ` (${attachments.length} tệp)` : ""}.`,
+            `Đã gửi tin trả lời của nhân viên${attachments.length ? ` (${attachments.length} tệp)` : ""}${voices.length ? ` (${voices.length} tin thoại)` : ""}.`,
         );
         // Gateway giữ các id này để nhân viên thu hồi tin sau.
         res.writeHead(200, { "content-type": "application/json" });

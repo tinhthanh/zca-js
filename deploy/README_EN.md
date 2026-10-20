@@ -40,6 +40,7 @@ Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer m
 ### Quoting and recalling agent replies
 
 - `POST /send` also takes `reply_to` (msgId of a customer message): the bot keeps the data of the last 2048 customer messages to send a native quote (`sendMessage({msg, quote})`, text only). It returns `{"ok": true, "message_ids": [...]}`.
+- `audio/*` files in `attachments` are sent as Zalo **voice messages** (`uploadAttachment` for the URL, then `sendVoice`); if that fails the file is sent as a plain attachment so the customer still gets it. Other files and text go through `sendMessage` as before.
 - `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` needs the `cliMsgId` too, taken from the bot hearing its own message (selfListen); before that it answers 409. The `undo` event of that message is not noted twice (the gateway already did).
 
 ### Customer state and messaging first
@@ -80,7 +81,7 @@ A successful sign-in writes `credentials.json` (0600) and starts the account rig
 ## 🩺 Healthcheck and resources
 
 -   Each account's state (`starting`, `running`, `retrying`, `dropped`) is written to `ZALO_HEALTH_FILE`; the container is `healthy` when every account is `running`. The healthcheck uses `grep` so it does not start an extra Node process every minute.
--   A failing account retries with backoff (30 seconds, doubling). Only a really expired session (Zalo rejects the credentials) stops after 2 attempts; network loss is retried forever, at most every 2 minutes, so the account reconnects once the network is back; when every account is dropped the process keeps running so broken sign-ins are not repeated.
+-   A failing account retries with backoff (30 seconds, doubling). Only a really expired session (Zalo rejects the credentials) stops after 2 attempts; network loss is retried forever, at most every 2 minutes, so the account reconnects once the network is back. A socket that dies without a close (network lost mid-connection) is caught by a watchdog: no frame for `ZALO_WATCHDOG_STALE_MS` (compose default 360000 = 6 minutes; Zalo answers its app ping about every 3 minutes; 0 = off) and it is cut and reconnected. `ZALO_WATCHDOG_OBSERVE=1` only logs the longest silence every 15 seconds, to measure before changing the threshold; when every account is dropped the process keeps running so broken sign-ins are not repeated.
 -   Measured at idle: one account ~27 MiB, each extra account ~8-10 MiB; the login page ~30 MiB. Image 172 MB.
 
 ## 🧪 Tests
