@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { ThreadType, Zalo, ZaloApiError } from "../dist/index.js";
 import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
-import { accountRoutes, describeAccountError, sessionExpired } from "./accounts.mjs";
+import { accountRoutes, describeAccountError, retryDelay, sessionExpired } from "./accounts.mjs";
 import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
 import {
     forwardFriendEvent,
@@ -30,10 +30,6 @@ const COMMANDS_ENABLED =
 
 const PREFIX = process.env.BOT_PREFIX || "/";
 const HEALTH_FILE = process.env.ZALO_HEALTH_FILE;
-const MAX_ATTEMPTS = 5;
-const SESSION_EXPIRED_ATTEMPTS = 2;
-const RETRY_BASE_MS = 30_000;
-const RETRY_MAX_MS = 600_000;
 const STABLE_AFTER_MS = 600_000;
 
 const accountStates = {};
@@ -180,16 +176,15 @@ async function superviseAccount(name, dir, ctl) {
             if (ctl.stopped) return true;
             accountErrors[name] = describeAccountError(error);
             attempt = Date.now() - started >= STABLE_AFTER_MS ? 1 : attempt + 1;
-            // Hết phiên: thử lại một lần (phòng lỗi thoáng qua) rồi dừng, chờ quét QR lại.
-            const limit = error.sessionExpired ? SESSION_EXPIRED_ATTEMPTS : MAX_ATTEMPTS;
-            if (attempt >= limit) {
+            // Hết phiên: thử lại một lần rồi dừng, chờ quét QR lại. Mất mạng: thử mãi.
+            const delay = retryDelay(error, attempt);
+            if (delay === null) {
                 setAccountState(name, "dropped");
                 log(name, "multi", `❌ Bỏ tài khoản sau ${attempt} lần lỗi liên tiếp: ${error.message}`);
                 return false;
             }
             setAccountState(name, "retrying");
-            const delay = Math.min(RETRY_BASE_MS * 2 ** (attempt - 1), RETRY_MAX_MS);
-            log(name, "multi", `❌ ${error.message}; thử lại sau ${delay / 1000}s (${attempt}/${limit}).`);
+            log(name, "multi", `❌ ${error.message}; thử lại sau ${delay / 1000}s (lần ${attempt}).`);
             await new Promise((resolve) => setTimeout(resolve, delay));
         }
     }

@@ -23,6 +23,7 @@ import {
     accountRoutes,
     describeAccountError,
     LoginSession,
+    retryDelay,
     SESSION_EXPIRED_MESSAGE,
     sessionExpired,
 } from "../accounts.mjs";
@@ -529,4 +530,14 @@ test("normalizePhone: số Việt Nam về dạng 84...", () => {
     assert.equal(normalizePhone("84901234567"), "84901234567");
     assert.equal(normalizePhone("abc"), null);
     assert.equal(normalizePhone("123"), null);
+});
+
+test("retryDelay: mất mạng thử mãi (tối đa 2 phút), hết phiên dừng sau 2 lần", () => {
+    const offline = new Error("fetch failed");
+    assert.equal(retryDelay(offline, 1), 30_000);
+    assert.equal(retryDelay(offline, 3), 120_000);
+    assert.equal(retryDelay(offline, 50), 120_000); // không bao giờ null
+    const expired = sessionExpired(new Error("bị từ chối"));
+    assert.equal(retryDelay(expired, 1), 30_000);
+    assert.equal(retryDelay(expired, 2), null);
 });

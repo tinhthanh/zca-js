@@ -19,6 +19,20 @@ export function sessionExpired(error) {
     return error;
 }
 
+export const SESSION_EXPIRED_ATTEMPTS = 2;
+const RETRY_BASE_MS = 30_000;
+const RETRY_MAX_MS = 600_000;
+// Mất mạng / lỗi kết nối: không bao giờ bỏ tài khoản, thử lại tối đa mỗi 2 phút
+// để có mạng lại là tự kết nối. Chỉ phiên hết hạn thật mới dừng.
+const OFFLINE_RETRY_MS = 120_000;
+
+/** Lần thử thứ `attempt` thất bại: số ms chờ trước lần sau, hoặc null = bỏ tài khoản. */
+export function retryDelay(error, attempt) {
+    if (error?.sessionExpired && attempt >= SESSION_EXPIRED_ATTEMPTS) return null;
+    const delay = Math.min(RETRY_BASE_MS * 2 ** (attempt - 1), RETRY_MAX_MS);
+    return error?.sessionExpired ? delay : Math.min(delay, OFFLINE_RETRY_MS);
+}
+
 /** Lỗi gần nhất cho trang Channel accounts: {kind, message}. */
 export function describeAccountError(error) {
     if (error?.sessionExpired) return { kind: "session_expired", message: SESSION_EXPIRED_MESSAGE };

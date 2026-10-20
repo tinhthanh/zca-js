@@ -80,7 +80,7 @@ Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) c
 ## 🩺 Healthcheck và tài nguyên
 
 -   Trạng thái từng tài khoản (`starting`, `running`, `retrying`, `dropped`) ghi vào `ZALO_HEALTH_FILE`; container `healthy` khi mọi tài khoản là `running`. Healthcheck dùng `grep` để không khởi động thêm tiến trình Node mỗi phút.
--   Tài khoản lỗi thử lại với backoff (30 giây, nhân đôi, tối đa 10 phút), bỏ sau 5 lần liên tiếp; khi mọi tài khoản bị bỏ, tiến trình vẫn chạy để không lặp lại đăng nhập hỏng.
+-   Tài khoản lỗi thử lại với backoff (30 giây, nhân đôi). Chỉ phiên hết hạn thật (Zalo từ chối credentials) mới dừng sau 2 lần; mất mạng thì thử lại mãi, tối đa mỗi 2 phút, có mạng lại là tự kết nối; khi mọi tài khoản bị bỏ, tiến trình vẫn chạy để không lặp lại đăng nhập hỏng.
 -   Đo lúc rảnh: 1 tài khoản ~27 MiB, mỗi tài khoản thêm ~8-10 MiB; trang login ~30 MiB. Image 172 MB.
 
 ## 🧪 Test

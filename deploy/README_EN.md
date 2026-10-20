@@ -80,7 +80,7 @@ A successful sign-in writes `credentials.json` (0600) and starts the account rig
 ## 🩺 Healthcheck and resources
 
 -   Each account's state (`starting`, `running`, `retrying`, `dropped`) is written to `ZALO_HEALTH_FILE`; the container is `healthy` when every account is `running`. The healthcheck uses `grep` so it does not start an extra Node process every minute.
--   A failing account retries with backoff (30 seconds, doubling, capped at 10 minutes) and is dropped after 5 consecutive failures; when every account is dropped the process keeps running so broken sign-ins are not repeated.
+-   A failing account retries with backoff (30 seconds, doubling). Only a really expired session (Zalo rejects the credentials) stops after 2 attempts; network loss is retried forever, at most every 2 minutes, so the account reconnects once the network is back; when every account is dropped the process keeps running so broken sign-ins are not repeated.
 -   Measured at idle: one account ~27 MiB, each extra account ~8-10 MiB; the login page ~30 MiB. Image 172 MB.
 
 ## 🧪 Tests
