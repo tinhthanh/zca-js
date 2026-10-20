@@ -14,6 +14,7 @@ import {
     RecentMessages,
     systemNoticeText,
 } from "../content.mjs";
+import { CatchUp } from "../catchup.mjs";
 import {
     captionOf,
     describeContent,
@@ -287,4 +288,35 @@ test("systemNoticeText nhận ra thông báo hệ thống webchat dạng object"
     assert.equal(systemNoticeText(notice), "Bạn vừa kết bạn với An");
     assert.equal(systemNoticeText({ data: { msgType: "webchat", content: "chào" } }), null);
     assert.equal(systemNoticeText({ data: { msgType: "chat.photo", content: { title: "x" } } }), null);
+});
+
+test("CatchUp chỉ nhận tin cũ mới hơn mốc đã lưu và không lặp tin sống", () => {
+    const dir = tempDir();
+    const file = path.join(dir, "catchup.json");
+    const msg = (msgId, ts, type = 0) => ({ type, data: { msgId, ts: String(ts) } });
+
+    // Lần chạy đầu: chưa có mốc, không xin và không nhận tin cũ.
+    const first = new CatchUp(file, { saveDelayMs: 0 });
+    assert.equal(first.lastId(0), null);
+    assert.equal(first.acceptOld(msg("1", 100)), false);
+    assert.equal(first.acceptLive(msg("2", 200)), true);
+    assert.equal(first.acceptLive(msg("2", 200)), false);
+    assert.equal(first.acceptLive(msg("g1", 150, 1)), true);
+    first.flush();
+
+    // Khởi động lại: xin từ mốc, chỉ nhận tin mới hơn, mỗi tin một lần.
+    const next = new CatchUp(file, { saveDelayMs: 0 });
+    assert.equal(next.lastId(0), "2");
+    assert.equal(next.lastId(1), "g1");
+    assert.equal(next.acceptOld(msg("2", 200)), false);
+    assert.equal(next.acceptOld(msg("3", 300)), true);
+    assert.equal(next.acceptOld(msg("3", 300)), false);
+    assert.equal(next.acceptLive(msg("3", 300)), false);
+    assert.equal(next.acceptOld(msg("g0", 120, 1)), false);
+    assert.equal(next.acceptOld(msg("g2", 160, 1)), true);
+    next.flush();
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), {
+        user: { msgId: "3", ts: 300 },
+        group: { msgId: "g2", ts: 160 },
+    });
 });

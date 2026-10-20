@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ThreadType, Zalo } from "../dist/index.js";
+import { CatchUp } from "./catchup.mjs";
 import { CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
 import {
     forwardGroupEvent,
@@ -79,14 +80,16 @@ async function runAccount(name, dir) {
     const { listener } = api;
     if (gatewayEnabled()) await registerAccount(name, api);
 
+    const catchUp = new CatchUp(path.join(dir, "catchup.json"));
     try {
-        await listenUntilClosed(name, api, listener);
+        await listenUntilClosed(name, api, listener, catchUp);
     } finally {
+        catchUp.flush();
         unregisterAccount(name);
     }
 }
 
-function listenUntilClosed(name, api, listener) {
+function listenUntilClosed(name, api, listener, catchUp) {
     return new Promise((resolve, reject) => {
         listener.on("connected", () => {
             setAccountState(name, "running");
@@ -98,10 +101,28 @@ function listenUntilClosed(name, api, listener) {
         });
         listener.on("error", (error) => log(name, "bot", `Lỗi listener: ${error?.message || error}`));
         listener.on("message", (message) => {
+            if (!catchUp.acceptLive(message)) return;
             if (gatewayEnabled()) void forwardMessage(name, api, message);
             void handleMessage(name, api, message);
         });
         if (gatewayEnabled()) {
+            // Sau mỗi lần (kết nối lại) có khoá giải mã: xin tin bị lỡ từ mốc đã lưu.
+            listener.on("cipher_key", () => {
+                for (const type of [ThreadType.User, ThreadType.Group]) {
+                    const lastId = catchUp.lastId(type);
+                    if (lastId) listener.requestOldMessages(type, lastId);
+                }
+            });
+            listener.on("old_messages", (messages) => {
+                const missed = messages
+                    .filter((m) => catchUp.acceptOld(m))
+                    .sort((a, b) => Number(a.data?.ts) - Number(b.data?.ts));
+                if (missed.length === 0) return;
+                log(name, "bot", `Lấy lại ${missed.length} tin bị lỡ khi bot không chạy.`);
+                void (async () => {
+                    for (const message of missed) await forwardMessage(name, api, message);
+                })();
+            });
             listener.on("undo", (undo) => void forwardUndo(name, undo));
             listener.on("reaction", (reaction) => void forwardReaction(name, reaction));
             listener.on("group_event", (event) => void forwardGroupEvent(name, event));

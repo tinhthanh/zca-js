@@ -15,6 +15,7 @@ deploy/
 ├── login.mjs                   # đăng nhập QR tại http://localhost:6081
 ├── bot.mjs                     # bot nhiều tài khoản, healthcheck, thử lại có giới hạn
 ├── gateway.mjs                 # nối omnichannel gateway (khi có GATEWAY_URL)
+├── catchup.mjs                 # lấy lại tin bị lỡ khi bot không chạy
 └── tests/deploy.test.mjs       # node:test
 ```
 
@@ -46,6 +47,7 @@ docker compose restart bot
 -   Avatar: `thread_avatar` là `fullAvt`/`avt` của nhóm (`getGroupInfo`) hoặc `avatar` của người (`getUserInfo`), nhớ 6 giờ; tin nhóm gửi thêm `sender_avatar` của người gửi.
 -   `undo`, `reaction`, `group_event`: gửi `POST /v1/event`, thành ghi chú nội bộ; nội dung tin bị thu hồi/được thả cảm xúc lấy từ bộ nhớ 4096 tin gần nhất (khoá `tài khoản:cliMsgId`).
 -   Bot bật `selfListen` để thấy tin chủ tài khoản tự gửi từ điện thoại/ứng dụng khác (ghi chú `owner_message`); tin do bot gửi qua `/send` được nhận ra bằng `msgId` trả về hoặc trùng nội dung trong 60 giây và bỏ qua.
+-   Tin bị lỡ khi bot không chạy (khởi động lại, mất mạng): mỗi tài khoản lưu mốc tin cuối (1-1 và nhóm) vào `catchup.json`; sau mỗi lần kết nối bot gọi `requestOldMessages` và chỉ chuyển tin mới hơn mốc, theo thứ tự thời gian, log `Lấy lại N tin bị lỡ khi bot không chạy.`. Lần chạy đầu (chưa có mốc) không lấy lại lịch sử. Gateway cũng chống trùng theo ID tin.
 -   `getGroupChatHistory` của zca-js hiện trả 404 nên không dùng.
 
 ## 🩺 Healthcheck và tài nguyên

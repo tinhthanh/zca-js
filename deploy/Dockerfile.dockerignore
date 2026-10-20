@@ -15,3 +15,4 @@ deploy
 !deploy/bot.mjs
 !deploy/gateway.mjs
 !deploy/content.mjs
+!deploy/catchup.mjs

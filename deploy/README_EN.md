@@ -15,6 +15,7 @@ deploy/
 ├── login.mjs                   # QR sign-in at http://localhost:6081
 ├── bot.mjs                     # multi-account bot, healthcheck, bounded retries
 ├── gateway.mjs                 # omnichannel gateway link (when GATEWAY_URL is set)
+├── catchup.mjs                 # recovers messages missed while the bot was down
 └── tests/deploy.test.mjs       # node:test
 ```
 
@@ -46,6 +47,7 @@ Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer m
 -   Avatars: `thread_avatar` is the group's `fullAvt`/`avt` (`getGroupInfo`) or the person's `avatar` (`getUserInfo`), cached for 6 hours; group messages also send the sender's `sender_avatar`.
 -   `undo`, `reaction` and `group_event` go to `POST /v1/event` and become private notes; the recalled/reacted message text comes from a cache of the last 4096 messages (key `account:cliMsgId`).
 -   The bot enables `selfListen` to see messages the owner sends from a phone or another app (`owner_message` notes); messages the bot itself sent through `/send` are recognised by the returned `msgId` or by matching text within 60 seconds and skipped.
+-   Messages missed while the bot was down (restart, network loss): each account stores the last handled message (1-1 and group) in `catchup.json`; after every connect the bot calls `requestOldMessages` and forwards only messages newer than that mark, oldest first, logging `Lấy lại N tin bị lỡ khi bot không chạy.`. The first run (no mark yet) does not replay history. The gateway also dedupes by message ID.
 -   zca-js `getGroupChatHistory` currently returns 404, so it is not used.
 
 ## 🩺 Healthcheck and resources
