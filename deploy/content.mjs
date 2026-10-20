@@ -254,7 +254,8 @@ export function friendEventInfo(event, ownId) {
         case FriendEventType.REJECT_REQUEST:
             return { threadId: other(d), kind: "note", text: "Lời mời kết bạn bị từ chối" };
         case FriendEventType.ADD:
-            return { threadId: event.threadId, kind: "note", text: "Đã trở thành bạn bè" };
+            // Zalo đã gửi tin hệ thống "Bạn vừa kết bạn với ..." (ghi chú ℹ️): không lặp.
+            return null;
         case FriendEventType.REMOVE:
             return { threadId: event.threadId, kind: "note", text: "Đã huỷ kết bạn" };
         case FriendEventType.BLOCK:

@@ -392,11 +392,7 @@ test("friendEventInfo: lời mời của khách thành tin, còn lại thành gh
             .threadId,
         "7",
     );
-    assert.deepEqual(friendEventInfo({ type: FriendEventType.ADD, threadId: "7", data: "7" }, me), {
-        threadId: "7",
-        kind: "note",
-        text: "Đã trở thành bạn bè",
-    });
+    assert.equal(friendEventInfo({ type: FriendEventType.ADD, threadId: "7", data: "7" }, me), null);
     assert.equal(friendEventInfo({ type: FriendEventType.SEEN_FRIEND_REQUEST, threadId: me, data: [] }, me), null);
 });
 
