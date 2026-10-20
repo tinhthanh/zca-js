@@ -16,3 +16,4 @@ deploy
 !deploy/gateway.mjs
 !deploy/content.mjs
 !deploy/catchup.mjs
+!deploy/accounts.mjs

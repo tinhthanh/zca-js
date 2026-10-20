@@ -16,6 +16,7 @@ deploy/
 ├── bot.mjs                     # multi-account bot, healthcheck, bounded retries
 ├── gateway.mjs                 # omnichannel gateway link (when GATEWAY_URL is set)
 ├── catchup.mjs                 # recovers messages missed while the bot was down
+├── accounts.mjs                # /accounts: QR sign-in inside the bot, reconnect, remove
 └── tests/deploy.test.mjs       # node:test
 ```
 
@@ -35,6 +36,20 @@ docker compose restart bot
 ## 🔗 Omnichannel mode
 
 Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer message is forwarded to the gateway (`POST /v1/inbound`), the bot serves `POST /send` on `BOT_HTTP_PORT` (default 7001) for agent replies, and `/ping`-style commands are disabled (`BOT_COMMANDS=1` to keep them). Groups carry the group name (`getGroupInfo`, cached). Images, files, videos, voice notes and GIFs are downloaded from Zalo's CDN (up to `GATEWAY_MAX_FILE_MB`, default 20 MiB) and sent as base64; stickers and links become a one-line description. Agent files go out through `sendMessage` with `{data, filename, metadata}`; PNG/JPEG/GIF/WebP dimensions are read from the header, so `sharp` is not needed. A `ZaloApiError` with a code (Zalo refused the message) returns 422 so the gateway does not retry; other failures return 502. The full stack lives in the `omnichannel` repository.
+
+### Account management (/accounts)
+
+With the gateway enabled, the bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for the Libredesk **Channel accounts** page (called by the gateway, never exposed to browsers):
+
+| Route | Action |
+|---|---|
+| `GET /accounts` | Accounts: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), current sign-in session |
+| `POST /accounts/<name>/login` | Start a QR sign-in inside the bot (up to `MAX_QR` codes) |
+| `GET /accounts/<name>/login` | Status: `qr` (with a `data:image/png` image), `scanned`, `confirming`, `success`, `error` |
+| `POST /accounts/<name>/restart` | Reconnect |
+| `DELETE /accounts/<name>` | Stop and delete the account directory |
+
+A successful sign-in writes `credentials.json` (0600) and starts the account right away, no restart needed. In gateway mode the bot also starts with no accounts so they can be added from the UI; standalone (no gateway) still needs at least one account.
 
 ### Rich content and events
 

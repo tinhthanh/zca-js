@@ -500,7 +500,8 @@ async function handleSend(req, res) {
     }
 }
 
-export function startSendServer() {
+/** HTTP cho gateway: POST /send (tin nhân viên) và `extra` (vd. /accounts), cùng token. */
+export function startSendServer(extra = null) {
     if (GATEWAY_TOKEN.length < 32) {
         log("", "gateway", "GATEWAY_TOKEN phải dài ít nhất 32 ký tự.");
         process.exit(1);
@@ -508,6 +509,15 @@ export function startSendServer() {
     const server = http.createServer((req, res) => {
         if (req.method === "POST" && req.url === "/send") {
             handleSend(req, res).catch(() => reply(res, 500, "error"));
+        } else if (extra && req.headers.authorization === `Bearer ${GATEWAY_TOKEN}`) {
+            extra(req, res, reply)
+                .then((handled) => handled || reply(res, 404, "not found"))
+                .catch((error) => {
+                    log("", "gateway", `❌ ${req.method} ${req.url}: ${error?.message || error}`);
+                    if (!res.headersSent) reply(res, 500, "error");
+                });
+        } else if (extra) {
+            reply(res, 401, "unauthorized");
         } else {
             reply(res, 404, "not found");
         }

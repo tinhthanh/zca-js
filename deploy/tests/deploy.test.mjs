@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { LoginQRCallbackEventType } from "../../dist/apis/loginQR.js";
 import { FriendEventType, ThreadType } from "../../dist/index.js";
 
 import { discoverAccounts, isValidCredentials, readCredentials, writePrivateJson } from "../common.mjs";
@@ -18,6 +19,7 @@ import {
     RecentMessages,
     systemNoticeText,
 } from "../content.mjs";
+import { accountRoutes, LoginSession } from "../accounts.mjs";
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
 import {
     captionOf,
@@ -401,4 +403,69 @@ test("tin cũ bị thu hồi chuyển thành sự kiện undo", () => {
     assert.equal(isRecall(old), true);
     assert.equal(isRecall({ data: { content: "hi" } }), false);
     assert.deepEqual(recallOf(old), { data: old.data, threadId: "g1", isSelf: false, isGroup: true });
+});
+
+test("LoginSession theo dõi các bước đăng nhập QR", () => {
+    const session = new LoginSession("shop");
+    let retried = 0;
+    const actions = { retry: () => retried++, abort: () => {} };
+    session.onEvent({ type: LoginQRCallbackEventType.QRCodeGenerated, data: { image: "AAA" }, actions });
+    assert.equal(session.toJSON().status, "qr");
+    assert.equal(session.toJSON().qr, "data:image/png;base64,AAA");
+    session.onEvent({ type: LoginQRCallbackEventType.QRCodeExpired, actions });
+    assert.equal(retried, 1);
+    session.onEvent({ type: LoginQRCallbackEventType.QRCodeScanned, actions });
+    assert.equal(session.status, "scanned");
+    session.set("success", "ok");
+    assert.equal(session.toJSON().qr, null);
+});
+
+test("accountRoutes: danh sách, đăng nhập QR lưu credentials rồi chạy tài khoản", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zalo-acc-"));
+    process.env.ZALO_ACCOUNTS_DIR = dir;
+    const calls = [];
+    const manager = {
+        list: () => [{ name: "shop", state: "running", profile: null }],
+        stop: async (name) => calls.push(["stop", name]),
+        restart: async (name) => calls.push(["restart", name]),
+    };
+    const fakeZalo = () => ({
+        loginQR: async (_opts, cb) => {
+            cb({ type: LoginQRCallbackEventType.QRCodeGenerated, data: { image: "QR" }, actions: {} });
+            return {
+                getContext: () => ({
+                    cookie: { toJSON: () => ({ cookies: [{ key: "a" }] }) },
+                    imei: "i",
+                    userAgent: "u",
+                }),
+            };
+        },
+    });
+    const handle = accountRoutes(manager, { createZalo: fakeZalo, accountsDir: dir });
+    const call = async (method, url) => {
+        const res = {
+            status: 0,
+            body: "",
+            writeHead(status) {
+                this.status = status;
+            },
+            end(body = "") {
+                this.body = body;
+            },
+        };
+        const handled = await handle({ method, url }, res, (r, status, body) => r.writeHead(status) || r.end(body));
+        return { handled, ...res };
+    };
+    assert.equal((await call("GET", "/send")).handled, false);
+    assert.equal(JSON.parse((await call("GET", "/accounts")).body)[0].name, "shop");
+    assert.equal((await call("POST", "/accounts/..%2Fetc/login")).status, 400);
+    assert.equal((await call("POST", "/accounts/new1/login")).status, 202);
+    await new Promise((r) => setTimeout(r, 20));
+    const status = JSON.parse((await call("GET", "/accounts/new1/login")).body);
+    assert.equal(status.status, "success");
+    assert.ok(readCredentials(path.join(dir, "new1", "credentials.json")));
+    assert.deepEqual(calls, [["restart", "new1"]]);
+    assert.equal((await call("DELETE", "/accounts/new1")).status, 204);
+    assert.equal(fs.existsSync(path.join(dir, "new1")), false);
+    fs.rmSync(dir, { recursive: true, force: true });
 });

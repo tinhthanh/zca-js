@@ -16,6 +16,7 @@ deploy/
 ├── bot.mjs                     # bot nhiều tài khoản, healthcheck, thử lại có giới hạn
 ├── gateway.mjs                 # nối omnichannel gateway (khi có GATEWAY_URL)
 ├── catchup.mjs                 # lấy lại tin bị lỡ khi bot không chạy
+├── accounts.mjs                # /accounts: đăng nhập QR trong bot, kết nối lại, gỡ
 └── tests/deploy.test.mjs       # node:test
 ```
 
@@ -35,6 +36,20 @@ docker compose restart bot
 ## 🔗 Chế độ omnichannel
 
 Đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự): mọi tin khách được chuyển tới gateway (`POST /v1/inbound`), bot mở `POST /send` tại `BOT_HTTP_PORT` (mặc định 7001) để nhận tin nhân viên trả lời, và lệnh `/ping`... bị tắt (`BOT_COMMANDS=1` để bật lại). Nhóm được gửi kèm tên nhóm (`getGroupInfo`, có cache). Ảnh, file, video, voice, GIF được tải từ CDN của Zalo (tối đa `GATEWAY_MAX_FILE_MB`, mặc định 20 MiB) và gửi kèm base64; sticker và link chỉ thành dòng mô tả. File nhân viên gửi đi bằng `sendMessage` với `{data, filename, metadata}`; kích thước ảnh PNG/JPEG/GIF/WebP được đọc từ header nên không cần `sharp`. Lỗi `ZaloApiError` có mã (Zalo từ chối hẳn) trả 422 để gateway không thử lại; lỗi khác trả 502. Stack đầy đủ nằm ở repo `omnichannel`.
+
+### Quản lý tài khoản (/accounts)
+
+Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route cho trang **Channel accounts** của Libredesk (gateway gọi, không mở trực tiếp cho trình duyệt):
+
+| Route | Việc |
+|---|---|
+| `GET /accounts` | Danh sách tài khoản: `name`, `state` (`starting`, `running`, `retrying`, `dropped`, `stopped`), `profile` (`uid`, `displayName`, `avatar`), phiên đăng nhập đang có |
+| `POST /accounts/<tên>/login` | Bắt đầu đăng nhập QR ngay trong bot (tối đa `MAX_QR` mã) |
+| `GET /accounts/<tên>/login` | Trạng thái: `qr` (kèm ảnh `data:image/png`), `scanned`, `confirming`, `success`, `error` |
+| `POST /accounts/<tên>/restart` | Kết nối lại |
+| `DELETE /accounts/<tên>` | Dừng và xoá thư mục tài khoản |
+
+Đăng nhập thành công thì lưu `credentials.json` (0600) và chạy tài khoản ngay, không cần restart. Bot vẫn khởi động khi chưa có tài khoản nào (chế độ gateway) để thêm từ giao diện; chạy riêng không gateway thì vẫn cần ít nhất một tài khoản.
 
 ### Tin giàu nội dung và sự kiện
 

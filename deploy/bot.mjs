@@ -9,7 +9,8 @@ import path from "node:path";
 
 import { ThreadType, Zalo } from "../dist/index.js";
 import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
-import { CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
+import { accountRoutes } from "./accounts.mjs";
+import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
 import {
     forwardFriendEvent,
     forwardGroupEvent,
@@ -33,9 +34,12 @@ const RETRY_MAX_MS = 600_000;
 const STABLE_AFTER_MS = 600_000;
 
 const accountStates = {};
+const accountProfiles = {}; // name -> {uid, displayName, avatar}: hiển thị trên giao diện
+const running = new Map(); // name -> {stopped, listener, abort}
 
 function setAccountState(name, value) {
-    accountStates[name] = value;
+    if (value === null) delete accountStates[name];
+    else accountStates[name] = value;
     if (!HEALTH_FILE) return;
     try {
         const tmp = `${HEALTH_FILE}.${process.pid}.tmp`;
@@ -70,7 +74,7 @@ async function handleMessage(name, api, message) {
 }
 
 /** Đăng nhập và chạy listener tới khi kết nối đóng hẳn (reject) hoặc bị dừng. */
-async function runAccount(name, dir) {
+async function runAccount(name, dir, ctl) {
     const credentials = readCredentials(path.join(dir, CREDENTIALS_FILE));
     if (!credentials) throw new Error("credentials.json thiếu hoặc không hợp lệ");
 
@@ -79,19 +83,33 @@ async function runAccount(name, dir) {
     const zalo = new Zalo({ checkUpdate: false, logging: false, selfListen: gatewayEnabled() });
     const api = await zalo.login(credentials);
     const { listener } = api;
+    ctl.listener = listener;
+    if (ctl.stopped) return;
     if (gatewayEnabled()) await registerAccount(name, api);
+    try {
+        const profile = (await api.fetchAccountInfo())?.profile || {};
+        accountProfiles[name] = {
+            uid: api.getOwnId(),
+            displayName: profile.displayName || "",
+            avatar: profile.avatar || "",
+        };
+    } catch {
+        accountProfiles[name] = { uid: api.getOwnId(), displayName: "", avatar: "" };
+    }
 
     const catchUp = new CatchUp(path.join(dir, "catchup.json"));
     try {
-        await listenUntilClosed(name, api, listener, catchUp);
+        await listenUntilClosed(name, api, listener, catchUp, ctl);
     } finally {
         catchUp.flush();
         unregisterAccount(name);
     }
 }
 
-function listenUntilClosed(name, api, listener, catchUp) {
+function listenUntilClosed(name, api, listener, catchUp, ctl) {
     return new Promise((resolve, reject) => {
+        // stopAccount: listener.stop() không chắc phát "closed", nên kết thúc trực tiếp.
+        ctl.abort = resolve;
         listener.on("connected", () => {
             setAccountState(name, "running");
             log(name, "bot", "Listener đã kết nối.");
@@ -137,15 +155,16 @@ function listenUntilClosed(name, api, listener, catchUp) {
     });
 }
 
-async function superviseAccount(name, dir) {
+async function superviseAccount(name, dir, ctl) {
     let attempt = 0;
-    for (;;) {
+    while (!ctl.stopped) {
         const started = Date.now();
         setAccountState(name, "starting");
         try {
-            await runAccount(name, dir);
+            await runAccount(name, dir, ctl);
             return true;
         } catch (error) {
+            if (ctl.stopped) return true;
             attempt = Date.now() - started >= STABLE_AFTER_MS ? 1 : attempt + 1;
             if (attempt >= MAX_ATTEMPTS) {
                 setAccountState(name, "dropped");
@@ -158,21 +177,68 @@ async function superviseAccount(name, dir) {
             await new Promise((resolve) => setTimeout(resolve, delay));
         }
     }
+    return true;
 }
 
+/** Chạy một tài khoản (không làm gì nếu đang chạy); trả về promise kết quả giám sát. */
+function startAccount(name) {
+    if (running.has(name)) return Promise.resolve(true);
+    const ctl = { stopped: false, listener: null, abort: null };
+    running.set(name, ctl);
+    return superviseAccount(name, path.join(ACCOUNTS_DIR, name), ctl).finally(() => {
+        if (running.get(name) === ctl) running.delete(name);
+    });
+}
+
+async function stopAccount(name) {
+    const ctl = running.get(name);
+    if (!ctl) return;
+    ctl.stopped = true;
+    running.delete(name);
+    try {
+        ctl.listener?.stop();
+    } catch {
+        // Listener chưa kết nối.
+    }
+    ctl.abort?.();
+    unregisterAccount(name);
+    setAccountState(name, null);
+    delete accountProfiles[name];
+    log(name, "multi", "Đã dừng tài khoản.");
+}
+
+const manager = {
+    list: () => {
+        const names = new Set([...discoverAccounts().map((a) => a.name), ...Object.keys(accountStates)]);
+        return [...names].sort().map((name) => ({
+            name,
+            state: accountStates[name] || "stopped",
+            profile: accountProfiles[name] || null,
+        }));
+    },
+    stop: stopAccount,
+    restart: async (name) => {
+        await stopAccount(name);
+        void startAccount(name);
+    },
+};
+
 const accounts = discoverAccounts();
-if (accounts.length === 0) {
+log("", "multi", `Chạy ${accounts.length} tài khoản: ${accounts.map((a) => a.name).join(", ") || "(chưa có)"}`);
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => process.exit(0));
+if (gatewayEnabled()) {
+    startSendServer(accountRoutes(manager));
+} else if (accounts.length === 0) {
     log("", "multi", "Chưa có tài khoản nào trong /data/accounts - chạy dịch vụ login trước.");
     process.exit(1);
 }
-log("", "multi", `Chạy ${accounts.length} tài khoản: ${accounts.map((a) => a.name).join(", ")}`);
-for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => process.exit(0));
-if (gatewayEnabled()) startSendServer();
+setAccountState("", null); // ghi file health ngay cả khi chưa có tài khoản
 
-const results = await Promise.all(accounts.map(({ name, dir }) => superviseAccount(name, dir)));
-if (!results.some(Boolean)) {
+const results = await Promise.all(accounts.map(({ name }) => startAccount(name)));
+if (accounts.length && !results.some(Boolean)) {
     // Không thoát: với restart unless-stopped, thoát sẽ khiến Docker restart và
-    // đăng nhập lại bằng credentials hỏng mãi mãi. Giữ tiến trình để báo unhealthy.
-    log("", "multi", "❌ Mọi tài khoản đã bị bỏ; đăng nhập lại bằng dịch vụ login rồi restart bot.");
-    setInterval(() => {}, 1 << 30);
+    // đăng nhập lại bằng credentials hỏng mãi mãi. Giữ tiến trình để báo unhealthy;
+    // đăng nhập lại từ giao diện (Tài khoản kênh) hoặc dịch vụ login.
+    log("", "multi", "❌ Mọi tài khoản đã bị bỏ; đăng nhập lại rồi bấm kết nối lại.");
 }
+setInterval(() => {}, 1 << 30);
