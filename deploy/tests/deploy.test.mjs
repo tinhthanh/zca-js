@@ -35,6 +35,7 @@ import {
     isBotEcho,
     toAttachmentSource,
     videoText,
+    sendContent,
 } from "../gateway.mjs";
 
 function tempDir() {
@@ -486,4 +487,12 @@ test("describeAccountError: hết phiên cần quét QR lại, còn lại là l�
         message: "Lỗi kết nối: fetch failed",
     });
     assert.equal(describeAccountError(new Error("x".repeat(500))).message.length, 200);
+});
+
+test("sendContent: trích dẫn tin gốc khi nhân viên trả lời trích dẫn", () => {
+    const quote = { msgId: "9", cliMsgId: "c9", content: "giá?" };
+    assert.deepEqual(sendContent("Dạ 5 triệu", [], quote), { msg: "Dạ 5 triệu", quote });
+    assert.equal(sendContent("Dạ", [], undefined), "Dạ");
+    const files = [{ filename: "a.jpg" }];
+    assert.deepEqual(sendContent("Ảnh", files, quote), { msg: "Ảnh", attachments: files });
 });

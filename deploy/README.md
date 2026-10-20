@@ -37,6 +37,11 @@ docker compose restart bot
 
 Đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự): mọi tin khách được chuyển tới gateway (`POST /v1/inbound`), bot mở `POST /send` tại `BOT_HTTP_PORT` (mặc định 7001) để nhận tin nhân viên trả lời, và lệnh `/ping`... bị tắt (`BOT_COMMANDS=1` để bật lại). Nhóm được gửi kèm tên nhóm (`getGroupInfo`, có cache). Ảnh, file, video, voice, GIF được tải từ CDN của Zalo (tối đa `GATEWAY_MAX_FILE_MB`, mặc định 20 MiB) và gửi kèm base64; sticker và link chỉ thành dòng mô tả. File nhân viên gửi đi bằng `sendMessage` với `{data, filename, metadata}`; kích thước ảnh PNG/JPEG/GIF/WebP được đọc từ header nên không cần `sharp`. Lỗi `ZaloApiError` có mã (Zalo từ chối hẳn) trả 422 để gateway không thử lại; lỗi khác trả 502. Stack đầy đủ nằm ở repo `omnichannel`.
 
+### Trích dẫn và thu hồi tin nhân viên
+
+- `POST /send` nhận thêm `reply_to` (msgId tin khách): bot nhớ dữ liệu 2048 tin khách gần nhất để gửi trích dẫn thật (`sendMessage({msg, quote})`, chỉ tin chữ). Trả về `{"ok": true, "message_ids": [...]}`.
+- `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` cần cả `cliMsgId`, lấy từ tin bot tự nghe lại (selfListen); chưa nghe lại thì trả 409. Sự kiện `undo` của chính tin đó không ghi chú lặp (gateway đã ghi).
+
 ### Quản lý tài khoản (/accounts)
 
 Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route cho trang **Channel accounts** của Libredesk (gateway gọi, không mở trực tiếp cho trình duyệt):

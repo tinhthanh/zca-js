@@ -37,6 +37,11 @@ docker compose restart bot
 
 Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer message is forwarded to the gateway (`POST /v1/inbound`), the bot serves `POST /send` on `BOT_HTTP_PORT` (default 7001) for agent replies, and `/ping`-style commands are disabled (`BOT_COMMANDS=1` to keep them). Groups carry the group name (`getGroupInfo`, cached). Images, files, videos, voice notes and GIFs are downloaded from Zalo's CDN (up to `GATEWAY_MAX_FILE_MB`, default 20 MiB) and sent as base64; stickers and links become a one-line description. Agent files go out through `sendMessage` with `{data, filename, metadata}`; PNG/JPEG/GIF/WebP dimensions are read from the header, so `sharp` is not needed. A `ZaloApiError` with a code (Zalo refused the message) returns 422 so the gateway does not retry; other failures return 502. The full stack lives in the `omnichannel` repository.
 
+### Quoting and recalling agent replies
+
+- `POST /send` also takes `reply_to` (msgId of a customer message): the bot keeps the data of the last 2048 customer messages to send a native quote (`sendMessage({msg, quote})`, text only). It returns `{"ok": true, "message_ids": [...]}`.
+- `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` needs the `cliMsgId` too, taken from the bot hearing its own message (selfListen); before that it answers 409. The `undo` event of that message is not noted twice (the gateway already did).
+
 ### Account management (/accounts)
 
 With the gateway enabled, the bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for the Libredesk **Channel accounts** page (called by the gateway, never exposed to browsers):

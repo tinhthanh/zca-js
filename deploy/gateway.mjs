@@ -59,6 +59,13 @@ const groupSettings = new Map(); // `${account}:${groupId}` -> groupSetting lầ
 const recentReplies = new Set();
 const recent = new RecentMessages(); // `${account}:${cliMsgId|msgId}` -> {summary, sender}
 const botSent = new RecentMessages(2048); // `${account}:${msgId}` của tin bot gửi qua /send
+// `${account}:${msgId}` -> dữ liệu tin gốc: zca-js cần nguyên tin để gửi trích dẫn
+// khi nhân viên trả lời trích dẫn (gateway gửi reply_to = msgId).
+const quotable = new RecentMessages(2048);
+// `${account}:${msgId}` -> {msgId, cliMsgId} của tin bot gửi (từ tin tự nghe thấy):
+// thu hồi (undo) cần cả cliMsgId mà sendMessage không trả về.
+const sentEchoes = new RecentMessages(2048);
+const botRecalled = new RecentMessages(512); // `${account}:${msgId|cliMsgId}` bot đã thu hồi
 let pendingEchoes = []; // tin bot đang gửi, chờ listener báo lại (isSelf)
 
 export const gatewayEnabled = () => Boolean(GATEWAY_URL);
@@ -217,6 +224,13 @@ function rememberMessage(account, message) {
         summary: summarize(message),
         sender: message.isSelf ? OWNER : d.dName || "",
     });
+    if (d.msgId) quotable.remember([`${account}:${d.msgId}`], d);
+}
+
+/** Nội dung gửi: kèm trích dẫn tin gốc nếu còn nhớ (chỉ tin chữ; tin có tệp gửi như cũ). */
+export function sendContent(text, attachments, quote) {
+    if (attachments.length) return { msg: text, attachments };
+    return quote ? { msg: text, quote } : text;
 }
 
 /** Tin isSelf do chính bot gửi (qua /send) thì không ghi chú lại. */
@@ -265,7 +279,11 @@ export async function forwardMessage(account, api, message) {
         return;
     }
     if (message.isSelf) {
-        if (isBotEcho(account, message)) return;
+        if (isBotEcho(account, message)) {
+            const d = message.data || {};
+            if (d.msgId) sentEchoes.remember([`${account}:${d.msgId}`], { msgId: d.msgId, cliMsgId: d.cliMsgId });
+            return;
+        }
         const { text, attachments } = await collect(account, api, message);
         if (text.trim() || attachments.length) {
             await postEvent(
@@ -304,6 +322,10 @@ export async function forwardMessage(account, api, message) {
 /** Thu hồi tin (của khách hoặc chủ tài khoản) thành ghi chú kèm nội dung đã nhớ. */
 export async function forwardUndo(account, undo) {
     const d = undo.data || {};
+    // Bot vừa thu hồi theo yêu cầu nhân viên: gateway đã ghi chú, không ghi lặp.
+    if (botRecalled.get(`${account}:${d.content?.globalMsgId}`) || botRecalled.get(`${account}:${d.content?.cliMsgId}`)) {
+        return;
+    }
     const target =
         recent.get(`${account}:${d.content?.cliMsgId}`) || recent.get(`${account}:${d.content?.globalMsgId}`);
     const who = undo.isSelf ? OWNER : d.dName || "";
@@ -474,7 +496,8 @@ async function handleSend(req, res) {
     };
     pendingEchoes.push(echo);
     try {
-        const content = attachments.length ? { msg: text, attachments } : text;
+        const quote = payload.reply_to ? quotable.get(`${account}:${payload.reply_to}`) : undefined;
+        const content = sendContent(text, attachments, quote);
         const result = await api.sendMessage(content, String(threadId), isGroup ? ThreadType.Group : ThreadType.User);
         const ids = [result?.message?.msgId, ...(result?.attachment || []).map((a) => a?.msgId)].filter(Boolean);
         botSent.remember(
@@ -486,7 +509,9 @@ async function handleSend(req, res) {
             "gateway",
             `Đã gửi tin trả lời của nhân viên${attachments.length ? ` (${attachments.length} tệp)` : ""}.`,
         );
-        reply(res, 200, "ok");
+        // Gateway giữ các id này để nhân viên thu hồi tin sau.
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, message_ids: ids.map(String) }));
     } catch (error) {
         recentReplies.delete(messageId);
         pendingEchoes = pendingEchoes.filter((p) => p !== echo);
@@ -500,6 +525,59 @@ async function handleSend(req, res) {
     }
 }
 
+/** Đọc body JSON (giới hạn MAX_SEND_BODY); null nếu lỗi (đã trả lời). */
+async function readJSON(req, res) {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+        size += chunk.length;
+        if (size > MAX_SEND_BODY) {
+            reply(res, 413, "too large");
+            return null;
+        }
+        chunks.push(chunk);
+    }
+    try {
+        return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+    } catch {
+        reply(res, 400, "invalid json");
+        return null;
+    }
+}
+
+/** Thu hồi tin nhân viên đã gửi (undo cần msgId + cliMsgId đã nhớ khi bot nghe lại tin). */
+async function handleRecall(req, res) {
+    if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
+    const payload = await readJSON(req, res);
+    if (!payload) return;
+    const { account, thread_id: threadId, is_group: isGroup } = payload;
+    const ids = Array.isArray(payload.message_ids) ? payload.message_ids.map(String) : [];
+    const api = apis.get(account);
+    if (!api) return reply(res, 404, "unknown account");
+    if (!threadId || ids.length === 0) return reply(res, 400, "invalid payload");
+    const targets = ids.map((id) => sentEchoes.get(`${account}:${id}`));
+    if (targets.some((t) => !t?.cliMsgId)) {
+        return reply(res, 409, "Bot chưa nghe lại tin này từ Zalo nên chưa thu hồi được; thử lại sau ít giây.");
+    }
+    try {
+        for (const target of targets) {
+            botRecalled.remember([`${account}:${target.msgId}`, `${account}:${target.cliMsgId}`], true);
+            await api.undo(target, String(threadId), isGroup ? ThreadType.Group : ThreadType.User);
+        }
+        log(account, "gateway", `Đã thu hồi tin nhân viên (${targets.length} tin).`);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+    } catch (error) {
+        const permanent = isPermanent(error);
+        log(account, "gateway", `❌ Thu hồi thất bại: ${error?.message || error}`);
+        reply(
+            res,
+            permanent ? 422 : 502,
+            permanent ? `Zalo từ chối thu hồi: ${error?.message || error}` : "recall failed",
+        );
+    }
+}
+
 /** HTTP cho gateway: POST /send (tin nhân viên) và `extra` (vd. /accounts), cùng token. */
 export function startSendServer(extra = null) {
     if (GATEWAY_TOKEN.length < 32) {
@@ -509,6 +587,8 @@ export function startSendServer(extra = null) {
     const server = http.createServer((req, res) => {
         if (req.method === "POST" && req.url === "/send") {
             handleSend(req, res).catch(() => reply(res, 500, "error"));
+        } else if (req.method === "POST" && req.url === "/recall") {
+            handleRecall(req, res).catch(() => reply(res, 500, "error"));
         } else if (extra && req.headers.authorization === `Bearer ${GATEWAY_TOKEN}`) {
             extra(req, res, reply)
                 .then((handled) => handled || reply(res, 404, "not found"))
