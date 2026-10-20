@@ -29,6 +29,7 @@ const COMMANDS_ENABLED =
 const PREFIX = process.env.BOT_PREFIX || "/";
 const HEALTH_FILE = process.env.ZALO_HEALTH_FILE;
 const MAX_ATTEMPTS = 5;
+const SESSION_EXPIRED_ATTEMPTS = 2;
 const RETRY_BASE_MS = 30_000;
 const RETRY_MAX_MS = 600_000;
 const STABLE_AFTER_MS = 600_000;
@@ -175,7 +176,8 @@ async function superviseAccount(name, dir, ctl) {
             if (ctl.stopped) return true;
             accountErrors[name] = describeAccountError(error);
             attempt = Date.now() - started >= STABLE_AFTER_MS ? 1 : attempt + 1;
-            if (attempt >= MAX_ATTEMPTS) {
+            // Hết phiên: thử lại một lần (phòng lỗi thoáng qua) rồi dừng, chờ quét QR lại.
+            if (attempt >= (error.sessionExpired ? SESSION_EXPIRED_ATTEMPTS : MAX_ATTEMPTS)) {
                 setAccountState(name, "dropped");
                 log(name, "multi", `❌ Bỏ tài khoản sau ${attempt} lần lỗi liên tiếp: ${error.message}`);
                 return false;
