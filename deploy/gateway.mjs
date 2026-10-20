@@ -400,6 +400,43 @@ export async function forwardFriendEvent(account, api, event) {
     }
 }
 
+const TYPING_THROTTLE_MS = 3000;
+const lastTyping = new Map(); // `${account}:${threadId}` -> lúc gửi "đang soạn" gần nhất
+
+async function postPresence(account, threadId, kind, messageIds = []) {
+    try {
+        await callGateway("/v1/presence", {
+            channel: CHANNEL,
+            account,
+            thread_id: String(threadId),
+            kind,
+            message_ids: messageIds.map(String),
+        });
+    } catch {
+        // Trạng thái phụ: mất một lần không sao, không log để khỏi nhiễu.
+    }
+}
+
+/** Khách đang soạn tin (Zalo gửi lại vài giây một lần): gửi gateway tối đa 3 giây/lần. */
+export async function forwardTyping(account, typing, now = Date.now()) {
+    if (typing.isSelf) return;
+    const key = `${account}:${typing.threadId}`;
+    if (now - (lastTyping.get(key) || 0) < TYPING_THROTTLE_MS) return;
+    lastTyping.set(key, now);
+    if (lastTyping.size > 4096) lastTyping.delete(lastTyping.keys().next().value);
+    await postPresence(account, typing.threadId, "typing");
+}
+
+/** Khách đã xem tin: msgId (và realMsgId) của tin nhân viên đã gửi. */
+export async function forwardSeen(account, seens) {
+    for (const seen of Array.isArray(seens) ? seens : [seens]) {
+        if (!seen || seen.isSelf) continue;
+        const ids = [seen.data?.msgId, seen.data?.realMsgId].filter(Boolean);
+        lastTyping.delete(`${account}:${seen.threadId}`);
+        await postPresence(account, seen.threadId, "read", ids);
+    }
+}
+
 function rememberReply(id) {
     if (!id) return false;
     if (recentReplies.has(id)) return true;
@@ -581,6 +618,41 @@ async function handleRecall(req, res) {
     }
 }
 
+/** Số điện thoại Việt Nam -> dạng Zalo tra được ("84..."); null nếu không giống số điện thoại. */
+export function normalizePhone(raw) {
+    const digits = String(raw || "").replace(/[\s.()-]/g, "");
+    if (!/^\+?\d{9,15}$/.test(digits)) return null;
+    if (digits.startsWith("+")) return digits.slice(1);
+    if (digits.startsWith("0")) return `84${digits.slice(1)}`;
+    return digits;
+}
+
+/** Tìm người nhận cho tin nhân viên nhắn trước: số điện thoại -> uid, tên, ảnh. */
+async function handleResolve(req, res) {
+    if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
+    const payload = await readJSON(req, res);
+    if (!payload) return;
+    const api = apis.get(payload.account);
+    if (!api) return reply(res, 404, "unknown account");
+    const phone = normalizePhone(payload.to);
+    if (!phone) return reply(res, 400, "Nhập số điện thoại Zalo của khách.");
+    try {
+        const user = await api.findUser(phone);
+        if (!user?.uid) return reply(res, 404, "Không tìm thấy tài khoản Zalo với số này.");
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+            JSON.stringify({
+                thread_id: String(user.uid),
+                name: user.display_name || user.zalo_name || "",
+                avatar: user.avatar || "",
+            }),
+        );
+    } catch (error) {
+        const permanent = isPermanent(error);
+        reply(res, permanent ? 404 : 502, permanent ? "Không tìm thấy tài khoản Zalo với số này." : "resolve failed");
+    }
+}
+
 /** HTTP cho gateway: POST /send (tin nhân viên) và `extra` (vd. /accounts), cùng token. */
 export function startSendServer(extra = null) {
     if (GATEWAY_TOKEN.length < 32) {
@@ -590,6 +662,8 @@ export function startSendServer(extra = null) {
     const server = http.createServer((req, res) => {
         if (req.method === "POST" && req.url === "/send") {
             handleSend(req, res).catch(() => reply(res, 500, "error"));
+        } else if (req.method === "POST" && req.url === "/resolve") {
+            handleResolve(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/recall") {
             handleRecall(req, res).catch(() => reply(res, 500, "error"));
         } else if (extra && req.headers.authorization === `Bearer ${GATEWAY_TOKEN}`) {

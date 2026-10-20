@@ -42,6 +42,11 @@ Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer m
 - `POST /send` also takes `reply_to` (msgId of a customer message): the bot keeps the data of the last 2048 customer messages to send a native quote (`sendMessage({msg, quote})`, text only). It returns `{"ok": true, "message_ids": [...]}`.
 - `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` needs the `cliMsgId` too, taken from the bot hearing its own message (selfListen); before that it answers 409. The `undo` event of that message is not noted twice (the gateway already did).
 
+### Customer state and messaging first
+
+- Customer `typing` and `seen_messages` → `POST /v1/presence` (`typing`, `read` with msgIds); typing is sent at most every 3 seconds per thread.
+- `POST /resolve {account, to}`: a phone number (`0…`, `+84…`, with spaces) → `findUser` → `{thread_id, name, avatar}` for messaging a new customer.
+
 ### Account management (/accounts)
 
 With the gateway enabled, the bot's HTTP server (same `GATEWAY_TOKEN` as `/send`) also serves routes for the Libredesk **Channel accounts** page (called by the gateway, never exposed to browsers):

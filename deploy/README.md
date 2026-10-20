@@ -42,6 +42,11 @@ docker compose restart bot
 - `POST /send` nhận thêm `reply_to` (msgId tin khách): bot nhớ dữ liệu 2048 tin khách gần nhất để gửi trích dẫn thật (`sendMessage({msg, quote})`, chỉ tin chữ). Trả về `{"ok": true, "message_ids": [...]}`.
 - `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` cần cả `cliMsgId`, lấy từ tin bot tự nghe lại (selfListen); chưa nghe lại thì trả 409. Sự kiện `undo` của chính tin đó không ghi chú lặp (gateway đã ghi).
 
+### Trạng thái khách và nhắn trước
+
+- `typing` và `seen_messages` của khách → `POST /v1/presence` (`typing`, `read` kèm msgId); "đang soạn" gửi tối đa 3 giây/lần mỗi hội thoại.
+- `POST /resolve {account, to}`: số điện thoại (`0…`, `+84…`, có dấu cách) → `findUser` → `{thread_id, name, avatar}` cho tính năng nhắn khách mới.
+
 ### Quản lý tài khoản (/accounts)
 
 Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) có thêm các route cho trang **Channel accounts** của Libredesk (gateway gọi, không mở trực tiếp cho trình duyệt):

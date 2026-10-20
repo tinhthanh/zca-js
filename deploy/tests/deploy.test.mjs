@@ -36,6 +36,9 @@ import {
     toAttachmentSource,
     videoText,
     sendContent,
+    forwardSeen,
+    forwardTyping,
+    normalizePhone,
 } from "../gateway.mjs";
 
 function tempDir() {
@@ -491,4 +494,39 @@ test("sendContent: trích dẫn tin gốc khi nhân viên trả lời trích d�
     assert.equal(sendContent("Dạ", [], undefined), "Dạ");
     const files = [{ filename: "a.jpg" }];
     assert.deepEqual(sendContent("Ảnh", files, quote), { msg: "Ảnh", attachments: files });
+});
+
+test("forwardTyping/forwardSeen: bỏ qua tin của mình, chặn gửi dồn", async () => {
+    const posted = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+        posted.push(JSON.parse(init.body));
+        return { ok: true };
+    };
+    try {
+        await forwardTyping("shop", { threadId: "u1", isSelf: false }, 10_000);
+        await forwardTyping("shop", { threadId: "u1", isSelf: false }, 11_000); // trong 3 giây: bỏ
+        await forwardTyping("shop", { threadId: "u1", isSelf: true }, 20_000);
+        await forwardSeen("shop", [
+            { threadId: "u1", isSelf: false, data: { msgId: "77", realMsgId: "0" } },
+            { threadId: "g1", isSelf: true, data: { msgId: "88" } },
+        ]);
+    } finally {
+        globalThis.fetch = realFetch;
+    }
+    assert.deepEqual(
+        posted.map((p) => [p.kind, p.thread_id, p.message_ids]),
+        [
+            ["typing", "u1", []],
+            ["read", "u1", ["77", "0"]],
+        ],
+    );
+});
+
+test("normalizePhone: số Việt Nam về dạng 84...", () => {
+    assert.equal(normalizePhone("0901 234.567"), "84901234567");
+    assert.equal(normalizePhone("+84901234567"), "84901234567");
+    assert.equal(normalizePhone("84901234567"), "84901234567");
+    assert.equal(normalizePhone("abc"), null);
+    assert.equal(normalizePhone("123"), null);
 });

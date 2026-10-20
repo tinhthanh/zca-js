@@ -13,6 +13,8 @@ import { accountRoutes, describeAccountError, sessionExpired } from "./accounts.
 import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
 import {
     forwardFriendEvent,
+    forwardSeen,
+    forwardTyping,
     forwardGroupEvent,
     forwardMessage,
     forwardReaction,
@@ -159,6 +161,8 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
             listener.on("reaction", (reaction) => void forwardReaction(name, reaction));
             listener.on("group_event", (event) => void forwardGroupEvent(name, event));
             listener.on("friend_event", (event) => void forwardFriendEvent(name, api, event));
+            listener.on("typing", (typing) => void forwardTyping(name, typing));
+            listener.on("seen_messages", (seens) => void forwardSeen(name, seens));
         }
         listener.start({ retryOnClose: true });
     });
