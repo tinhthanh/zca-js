@@ -8,9 +8,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ThreadType, Zalo } from "../dist/index.js";
-import { CatchUp } from "./catchup.mjs";
+import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
 import { CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
 import {
+    forwardFriendEvent,
     forwardGroupEvent,
     forwardMessage,
     forwardReaction,
@@ -120,12 +121,17 @@ function listenUntilClosed(name, api, listener, catchUp) {
                 if (missed.length === 0) return;
                 log(name, "bot", `Lấy lại ${missed.length} tin bị lỡ khi bot không chạy.`);
                 void (async () => {
-                    for (const message of missed) await forwardMessage(name, api, message);
+                    for (const message of missed) {
+                        // Tin cũ bị thu hồi: listener sống phát "undo", tin cũ thì không.
+                        if (isRecall(message)) await forwardUndo(name, recallOf(message));
+                        else await forwardMessage(name, api, message);
+                    }
                 })();
             });
             listener.on("undo", (undo) => void forwardUndo(name, undo));
             listener.on("reaction", (reaction) => void forwardReaction(name, reaction));
             listener.on("group_event", (event) => void forwardGroupEvent(name, event));
+            listener.on("friend_event", (event) => void forwardFriendEvent(name, api, event));
         }
         listener.start({ retryOnClose: true });
     });

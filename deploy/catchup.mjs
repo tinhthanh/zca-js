@@ -15,6 +15,23 @@ function kindOf(message) {
     return message.type === ThreadType.Group ? "group" : "user";
 }
 
+/** Tin cũ là lệnh thu hồi (content có deleteMsg), giống cách listener sống nhận ra "undo". */
+export function isRecall(message) {
+    const c = message.data?.content;
+    return Boolean(c && typeof c === "object" && Object.hasOwn(c, "deleteMsg"));
+}
+
+/** Dạng sự kiện undo từ tin cũ. Không dựng lại Undo: UserMessage đã đổi uidFrom "0"
+ *  thành id của mình, nên lấy threadId/isSelf đã tính sẵn của tin. */
+export function recallOf(message) {
+    return {
+        data: message.data,
+        threadId: message.threadId,
+        isSelf: message.isSelf,
+        isGroup: message.type === ThreadType.Group,
+    };
+}
+
 export class CatchUp {
     constructor(file, { saveDelayMs = SAVE_DELAY_MS } = {}) {
         this.file = file;

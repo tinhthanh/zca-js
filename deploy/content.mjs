@@ -1,6 +1,8 @@
 // Chuyển tin/sự kiện Zalo thành chữ hiển thị được trong Libredesk (hàm thuần, không gọi mạng).
 // Dựa trên payload thật ghi lại từ zca-js: chat.recommended (link, danh thiếp),
-// group.poll, chat.sticker, quote, reaction, undo, group_event.
+// group.poll, chat.sticker, quote, reaction, undo, group_event, friend_event.
+
+import { FriendEventType } from "../dist/index.js";
 
 const REACTION_EMOJI = {
     "/-heart": "❤️",
@@ -161,8 +163,31 @@ export function reactionEmoji(icon) {
     return REACTION_EMOJI[icon] || icon || "❓";
 }
 
-/** Chữ cho group_event; null nếu loại sự kiện không đáng ghi chú. */
-export function groupEventText(event) {
+// Cài đặt nhóm Zalo (groupSetting) -> nhãn cho nhân viên.
+const GROUP_SETTING_LABELS = {
+    blockName: "Chỉ trưởng/phó nhóm đổi tên, ảnh nhóm",
+    signAdminMsg: "Làm nổi tin của trưởng/phó nhóm",
+    addMemberOnly: "Chỉ trưởng/phó nhóm thêm thành viên",
+    setTopicOnly: "Chỉ trưởng/phó nhóm ghim tin, tạo ghi chú, nhắc hẹn",
+    enableMsgHistory: "Thành viên mới xem được tin cũ",
+    joinAppr: "Duyệt thành viên mới",
+    lockCreatePost: "Khoá tạo ghi chú, nhắc hẹn",
+    lockCreatePoll: "Khoá tạo bình chọn",
+    lockSendMsg: "Chỉ trưởng/phó nhóm được gửi tin",
+    lockViewMember: "Ẩn danh sách thành viên",
+};
+
+/** Dòng mô tả các cài đặt nhóm đã đổi so với lần trước; [] nếu không biết lần trước. */
+export function groupSettingChanges(previous, next) {
+    if (!previous || !next) return [];
+    return Object.entries(GROUP_SETTING_LABELS)
+        .filter(([key]) => key in next && Boolean(previous[key]) !== Boolean(next[key]))
+        .map(([key, label]) => `${label}: ${next[key] ? "bật" : "tắt"}`);
+}
+
+/** Chữ cho group_event; null nếu loại sự kiện không đáng ghi chú. Ghi chú, nhắc hẹn
+ *  và ghim ghi chú không xử lý ở đây: Zalo đã gửi kèm tin hệ thống webchat. */
+export function groupEventText(event, previousSetting = null) {
     const d = event.data || {};
     const names = (d.updateMembers || [])
         .map((m) => (typeof m === "string" ? m : m?.dName))
@@ -185,6 +210,57 @@ export function groupEventText(event) {
             return `${names || "Một thành viên"} không còn là phó nhóm`;
         case "new_link":
             return "Nhóm tạo link mời mới";
+        case "update_avatar":
+            return "Nhóm đổi ảnh đại diện";
+        case "update_setting": {
+            const changes = groupSettingChanges(previousSetting, d.groupSetting);
+            return changes.length ? `Cài đặt nhóm thay đổi:\n${changes.join("\n")}` : "Cài đặt nhóm thay đổi";
+        }
+        case "join_request": {
+            const count = (d.uids || []).length || 1;
+            return `${count} người xin vào nhóm${d.totalPending ? ` (đang chờ duyệt: ${d.totalPending})` : ""}`;
+        }
+        case "accept_remind":
+            return `${(d.updateMembers || []).length || 1} người tham gia nhắc hẹn`;
+        case "reject_remind":
+            return `${(d.updateMembers || []).length || 1} người từ chối nhắc hẹn`;
+        default:
+            return null;
+    }
+}
+
+/** Sự kiện bạn bè -> {threadId, kind, text} để ghi chú/chuyển; null nếu bỏ qua.
+ *  `kind` là "request" (lời mời từ người khác: thành tin của khách) hoặc "note".
+ *  zca-js đặt threadId của REQUEST/UNDO/REJECT là toUid (có thể là chính mình),
+ *  nên lấy phía còn lại theo ownId. */
+export function friendEventInfo(event, ownId) {
+    const d = event.data;
+    const other = (r) => (String(r?.fromUid) === String(ownId) ? r?.toUid : r?.fromUid);
+    switch (event.type) {
+        case FriendEventType.REQUEST: {
+            const fromMe = String(d?.fromUid) === String(ownId);
+            const msg = typeof d?.message === "string" ? d.message.trim() : "";
+            if (fromMe) {
+                return {
+                    threadId: d?.toUid,
+                    kind: "note",
+                    text: `Chủ tài khoản đã gửi lời mời kết bạn${msg ? `: «${msg}»` : ""}`,
+                };
+            }
+            return { threadId: d?.fromUid, kind: "request", text: joinLines("🤝 Lời mời kết bạn", msg && `«${msg}»`) };
+        }
+        case FriendEventType.UNDO_REQUEST:
+            return { threadId: other(d), kind: "note", text: "Lời mời kết bạn đã bị thu hồi" };
+        case FriendEventType.REJECT_REQUEST:
+            return { threadId: other(d), kind: "note", text: "Lời mời kết bạn bị từ chối" };
+        case FriendEventType.ADD:
+            return { threadId: event.threadId, kind: "note", text: "Đã trở thành bạn bè" };
+        case FriendEventType.REMOVE:
+            return { threadId: event.threadId, kind: "note", text: "Đã huỷ kết bạn" };
+        case FriendEventType.BLOCK:
+            return { threadId: event.threadId, kind: "note", text: "Chủ tài khoản đã chặn người này" };
+        case FriendEventType.UNBLOCK:
+            return { threadId: event.threadId, kind: "note", text: "Chủ tài khoản đã bỏ chặn người này" };
         default:
             return null;
     }

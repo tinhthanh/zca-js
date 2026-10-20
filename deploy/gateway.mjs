@@ -10,6 +10,7 @@ import { ThreadType, ZaloApiError } from "../dist/index.js";
 import { log } from "./common.mjs";
 import {
     describeContent,
+    friendEventInfo,
     groupEventText,
     quoteText,
     reactionEmoji,
@@ -53,7 +54,8 @@ const EXT_BY_TYPE = {
 
 const apis = new Map(); // account -> zca-js API
 const profiles = new Map(); // `${account}:${g|u}:${id}` -> {name, avatar, at}
-const PROFILE_TTL_MS = 6 * 60 * 60 * 1000; // avatar đổi thì sau vài giờ mới cập nhật
+const PROFILE_TTL_MS = 6 * 60 * 60 * 1000; // sự kiện đổi tên/ảnh nhóm xoá cache sớm hơn
+const groupSettings = new Map(); // `${account}:${groupId}` -> groupSetting lần cuối thấy
 const recentReplies = new Set();
 const recent = new RecentMessages(); // `${account}:${cliMsgId|msgId}` -> {summary, sender}
 const botSent = new RecentMessages(2048); // `${account}:${msgId}` của tin bot gửi qua /send
@@ -110,6 +112,7 @@ async function threadProfile(account, api, message, isGroup) {
         if (isGroup) {
             const info = (await api.getGroupInfo(id))?.gridInfoMap?.[id];
             found = { name: info?.name || "", avatar: info?.fullAvt || info?.avt || "" };
+            if (info?.setting) groupSettings.set(`${account}:${id}`, info.setting);
         } else {
             const changed = (await api.getUserInfo(id))?.changed_profiles || {};
             const user = changed[id] || changed[`${id}_0`];
@@ -318,13 +321,58 @@ export async function forwardReaction(account, reaction) {
     await postEvent(account, reaction.threadId, Boolean(reaction.isGroup), "reaction", who, text, d.msgId);
 }
 
-/** Sự kiện nhóm đáng chú ý (đổi tên, vào/ra, phó nhóm...) thành ghi chú. */
+/** Sự kiện nhóm đáng chú ý (đổi tên, vào/ra, phó nhóm, cài đặt...) thành ghi chú. */
 export async function forwardGroupEvent(account, event) {
-    const text = groupEventText(event);
-    if (!text) return;
     const d = event.data || {};
-    const id = `${event.type}-${d.groupId || event.threadId}-${d.groupName || ""}-${(d.updateMembers || []).length}`;
+    const settingKey = `${account}:${event.threadId}`;
+    const previousSetting = groupSettings.get(settingKey) || null;
+    if (d.groupSetting) groupSettings.set(settingKey, d.groupSetting);
+    if (event.type === "update" || event.type === "update_avatar") {
+        // Tin sau sẽ tra lại tên/ảnh nhóm và gateway cập nhật Libredesk.
+        profiles.delete(`${account}:g:${event.threadId}`);
+    }
+    const text = groupEventText(event, previousSetting);
+    if (!text) return;
+    const detail = event.type === "update_setting" ? JSON.stringify(d.groupSetting || {}) : d.groupName || "";
+    const id = `${event.type}-${d.groupId || event.threadId}-${detail}-${(d.updateMembers || d.uids || []).length}`;
     await postEvent(account, event.threadId, true, "group_event", "", text, `${id}-${Math.floor(Date.now() / 60000)}`);
+}
+
+/** Lời mời kết bạn từ người khác thành tin của khách (thường là khách mới); các sự
+ *  kiện bạn bè khác thành ghi chú trong hội thoại 1-1 đã có. */
+export async function forwardFriendEvent(account, api, event) {
+    const info = friendEventInfo(event, api.getOwnId());
+    if (!info?.threadId) return;
+    const minute = Math.floor(Date.now() / 60000);
+    if (info.kind !== "request") {
+        await postEvent(
+            account,
+            info.threadId,
+            false,
+            "friend_event",
+            "",
+            info.text,
+            `${event.type}-${info.threadId}-${minute}`,
+        );
+        return;
+    }
+    const message = { threadId: info.threadId, data: { uidFrom: info.threadId, dName: "" } };
+    const fields = await threadFields(account, api, message, false);
+    try {
+        await callGateway("/v1/inbound", {
+            channel: CHANNEL,
+            account,
+            thread_id: String(info.threadId),
+            is_group: false,
+            ...fields,
+            sender_name: fields.thread_name,
+            text: info.text,
+            // Gửi lại cùng lời mời trong ngày không tạo tin trùng.
+            message_id: `friend-request-${info.threadId}-${Math.floor(minute / 1440)}`,
+        });
+    } catch (error) {
+        log(account, "gateway", `❌ Không chuyển được lời mời kết bạn tới gateway: ${error.message}`);
+    }
 }
 
 function rememberReply(id) {

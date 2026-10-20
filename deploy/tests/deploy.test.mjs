@@ -5,16 +5,20 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { FriendEventType, ThreadType } from "../../dist/index.js";
+
 import { discoverAccounts, isValidCredentials, readCredentials, writePrivateJson } from "../common.mjs";
 import {
     findCoordinates,
+    friendEventInfo,
     groupEventText,
+    groupSettingChanges,
     quoteText,
     reactionEmoji,
     RecentMessages,
     systemNoticeText,
 } from "../content.mjs";
-import { CatchUp } from "../catchup.mjs";
+import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
 import {
     captionOf,
     describeContent,
@@ -319,4 +323,82 @@ test("CatchUp chỉ nhận tin cũ mới hơn mốc đã lưu và không lặp t
         user: { msgId: "3", ts: 300 },
         group: { msgId: "g2", ts: 160 },
     });
+});
+
+test("sự kiện nhóm mới: cài đặt, ảnh, xin vào nhóm, nhắc hẹn", () => {
+    const before = { lockCreatePoll: 0, joinAppr: 0, signAdminMsg: 1 };
+    const after = { lockCreatePoll: 1, joinAppr: 0, signAdminMsg: 1 };
+    assert.deepEqual(groupSettingChanges(before, after), ["Khoá tạo bình chọn: bật"]);
+    assert.deepEqual(groupSettingChanges(null, after), []);
+    assert.equal(
+        groupEventText({ type: "update_setting", data: { groupSetting: after } }, before),
+        "Cài đặt nhóm thay đổi:\nKhoá tạo bình chọn: bật",
+    );
+    assert.equal(groupEventText({ type: "update_setting", data: { groupSetting: after } }), "Cài đặt nhóm thay đổi");
+    assert.equal(groupEventText({ type: "update_avatar", data: {} }), "Nhóm đổi ảnh đại diện");
+    assert.equal(
+        groupEventText({ type: "join_request", data: { uids: ["1", "2"], totalPending: 3 } }),
+        "2 người xin vào nhóm (đang chờ duyệt: 3)",
+    );
+    assert.equal(
+        groupEventText({ type: "accept_remind", data: { updateMembers: ["1"] } }),
+        "1 người tham gia nhắc hẹn",
+    );
+    // Đã có tin hệ thống webchat / thẻ nhắc hẹn của Zalo: không ghi chú trùng.
+    for (const type of ["new_pin_topic", "update_pin_topic", "update_topic", "remove_board", "remind_topic"]) {
+        assert.equal(groupEventText({ type, data: {} }), null, type);
+    }
+});
+
+test("friendEventInfo: lời mời của khách thành tin, còn lại thành ghi chú", () => {
+    const me = "100";
+    assert.deepEqual(
+        friendEventInfo(
+            {
+                type: FriendEventType.REQUEST,
+                threadId: me,
+                data: { fromUid: "7", toUid: me, message: " Xin chào shop " },
+            },
+            me,
+        ),
+        {
+            threadId: "7",
+            kind: "request",
+            text: "🤝 Lời mời kết bạn\n«Xin chào shop»",
+        },
+    );
+    assert.deepEqual(
+        friendEventInfo(
+            { type: FriendEventType.REQUEST, threadId: "7", data: { fromUid: me, toUid: "7", message: "" } },
+            me,
+        ),
+        {
+            threadId: "7",
+            kind: "note",
+            text: "Chủ tài khoản đã gửi lời mời kết bạn",
+        },
+    );
+    assert.equal(
+        friendEventInfo({ type: FriendEventType.UNDO_REQUEST, threadId: me, data: { fromUid: "7", toUid: me } }, me)
+            .threadId,
+        "7",
+    );
+    assert.deepEqual(friendEventInfo({ type: FriendEventType.ADD, threadId: "7", data: "7" }, me), {
+        threadId: "7",
+        kind: "note",
+        text: "Đã trở thành bạn bè",
+    });
+    assert.equal(friendEventInfo({ type: FriendEventType.SEEN_FRIEND_REQUEST, threadId: me, data: [] }, me), null);
+});
+
+test("tin cũ bị thu hồi chuyển thành sự kiện undo", () => {
+    const old = {
+        type: ThreadType.Group,
+        threadId: "g1",
+        isSelf: false,
+        data: { msgType: "chat.undo", msgId: "9", content: { deleteMsg: 0, cliMsgId: "c1", globalMsgId: "g9" } },
+    };
+    assert.equal(isRecall(old), true);
+    assert.equal(isRecall({ data: { content: "hi" } }), false);
+    assert.deepEqual(recallOf(old), { data: old.data, threadId: "g1", isSelf: false, isGroup: true });
 });
