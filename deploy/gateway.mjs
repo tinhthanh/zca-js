@@ -323,7 +323,10 @@ export async function forwardMessage(account, api, message) {
 export async function forwardUndo(account, undo) {
     const d = undo.data || {};
     // Bot vừa thu hồi theo yêu cầu nhân viên: gateway đã ghi chú, không ghi lặp.
-    if (botRecalled.get(`${account}:${d.content?.globalMsgId}`) || botRecalled.get(`${account}:${d.content?.cliMsgId}`)) {
+    if (
+        botRecalled.get(`${account}:${d.content?.globalMsgId}`) ||
+        botRecalled.get(`${account}:${d.content?.cliMsgId}`)
+    ) {
         return;
     }
     const target =
