@@ -19,9 +19,11 @@ import {
     forwardGroupEvent,
     forwardMessage,
     forwardReaction,
+    flushRecent,
     forwardUndo,
     gatewayEnabled,
     registerAccount,
+    restoreRecent,
     startSendServer,
     unregisterAccount,
 } from "./gateway.mjs";
@@ -180,7 +182,7 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
                 })();
             });
             listener.on("undo", (undo) => void forwardUndo(name, undo));
-            listener.on("reaction", (reaction) => void forwardReaction(name, reaction));
+            listener.on("reaction", (reaction) => void forwardReaction(name, api, reaction));
             listener.on("group_event", (event) => void forwardGroupEvent(name, event));
             listener.on("friend_event", (event) => void forwardFriendEvent(name, api, event));
             listener.on("typing", (typing) => void forwardTyping(name, typing));
@@ -264,8 +266,14 @@ const manager = {
 
 const accounts = discoverAccounts();
 log("", "multi", `Chạy ${accounts.length} tài khoản: ${accounts.map((a) => a.name).join(", ") || "(chưa có)"}`);
-for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => process.exit(0));
+for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => {
+        flushRecent();
+        process.exit(0);
+    });
+}
 if (gatewayEnabled()) {
+    restoreRecent();
     startSendServer(accountRoutes(manager));
 } else if (accounts.length === 0) {
     log("", "multi", "Chưa có tài khoản nào trong /data/accounts - chạy dịch vụ login trước.");

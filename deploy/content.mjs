@@ -144,9 +144,29 @@ export function systemNoticeText(message) {
     return [c.title, c.description].filter((v) => typeof v === "string" && v.trim()).join("\n") || null;
 }
 
+// Tin có tệp: nhãn ngắn thay cho "[chat.photo] URL" khi tóm tắt.
+const MEDIA_LABELS = {
+    "chat.photo": "🖼️ Ảnh",
+    "chat.video.msg": "🎬 Video",
+    "chat.voice": "🎤 Tin thoại",
+    "chat.gif": "🖼️ GIF",
+    "chat.doodle": "✏️ Hình vẽ",
+    "chat.sticker": "🧩 Sticker",
+};
+
+function mediaSummary(message) {
+    const type = message.data?.msgType;
+    const c = message.data?.content;
+    if (!c || typeof c !== "object") return null;
+    const title = typeof c.title === "string" && !/^https?:\/\//.test(c.title.trim()) ? c.title.trim() : "";
+    if (type === "share.file") return `📎 ${title || "Tệp"}`;
+    if (!MEDIA_LABELS[type]) return null;
+    return title && type !== "chat.sticker" ? `${MEDIA_LABELS[type]}: ${title}` : MEDIA_LABELS[type];
+}
+
 /** Dòng tóm tắt một tin để nhớ (cho thu hồi/reaction) và để trích dẫn. */
 export function summarize(message) {
-    const text = describeContent(message).replace(/\s+/g, " ").trim();
+    const text = (mediaSummary(message) || describeContent(message)).replace(/\s+/g, " ").trim();
     return text.length > 200 ? `${text.slice(0, 199)}…` : text;
 }
 
@@ -161,6 +181,14 @@ export function quoteText(message) {
 
 export function reactionEmoji(icon) {
     return REACTION_EMOJI[icon] || icon || "❓";
+}
+
+/** Chữ ghi chú cho reaction: emoji (hoặc bỏ cảm xúc) + tin được thả, kèm người gửi tin trong nhóm. */
+export function reactionText(icon, target, isGroup) {
+    const action = icon ? reactionEmoji(icon) : "Bỏ cảm xúc";
+    if (!target) return `${action} vào một tin cũ (bot không còn nhớ nội dung)`;
+    const owner = isGroup && target.sender ? ` của ${target.sender}` : "";
+    return `${action} vào tin${owner} «${target.summary}»`;
 }
 
 // Cài đặt nhóm Zalo (groupSetting) -> nhãn cho nhân viên.
@@ -282,5 +310,16 @@ export class RecentMessages {
     }
     get(key) {
         return key ? this.items.get(key) : undefined;
+    }
+    /** Các cặp [key, value] để lưu xuống file (cũ trước, mới sau). */
+    entries() {
+        return [...this.items];
+    }
+    /** Nạp lại từ entries() đã lưu; bỏ qua dữ liệu hỏng. */
+    restore(entries) {
+        if (!Array.isArray(entries)) return;
+        for (const entry of entries) {
+            if (Array.isArray(entry) && typeof entry[0] === "string") this.remember([entry[0]], entry[1]);
+        }
     }
 }

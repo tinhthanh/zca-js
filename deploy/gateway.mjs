@@ -4,16 +4,18 @@
 //   POST {GATEWAY_URL}/v1/event, thành ghi chú nội bộ.
 // - Tin nhân viên trả lời: gateway gọi POST /send trên server HTTP nội bộ này.
 // Chỉ bật khi có GATEWAY_URL; token dùng chung qua GATEWAY_TOKEN.
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 
 import { ThreadType, ZaloApiError } from "../dist/index.js";
-import { log } from "./common.mjs";
+import { ACCOUNTS_DIR, log, writePrivateJson } from "./common.mjs";
 import {
     describeContent,
     friendEventInfo,
     groupEventText,
     quoteText,
-    reactionEmoji,
+    reactionText,
     RecentMessages,
     summarize,
     systemNoticeText,
@@ -57,7 +59,12 @@ const profiles = new Map(); // `${account}:${g|u}:${id}` -> {name, avatar, at}
 const PROFILE_TTL_MS = 6 * 60 * 60 * 1000; // sự kiện đổi tên/ảnh nhóm xoá cache sớm hơn
 const groupSettings = new Map(); // `${account}:${groupId}` -> groupSetting lần cuối thấy
 const recentReplies = new Set();
-const recent = new RecentMessages(); // `${account}:${cliMsgId|msgId}` -> {summary, sender}
+const recent = new RecentMessages(8192); // ~4096 tin (mỗi tin 2 khoá), `${account}:${cliMsgId|msgId}` -> {summary, sender}
+// Lưu `recent` để reaction/thu hồi tin cũ vẫn có nội dung sau khi bot khởi động lại.
+const RECENT_FILE = process.env.ZALO_RECENT_FILE || path.join(ACCOUNTS_DIR, "..", "recent-messages.json");
+const RECENT_SAVE_MS = 5_000;
+let recentSaveTimer = null;
+let recentDirty = false;
 const botSent = new RecentMessages(2048); // `${account}:${msgId}` của tin bot gửi qua /send
 // `${account}:${msgId}` -> dữ liệu tin gốc: zca-js cần nguyên tin để gửi trích dẫn
 // khi nhân viên trả lời trích dẫn (gateway gửi reply_to = msgId).
@@ -218,12 +225,42 @@ async function collect(account, api, message) {
     return { text, attachments };
 }
 
+/** Nạp `recent` đã lưu (gọi một lần lúc bot khởi động). */
+export function restoreRecent(file = RECENT_FILE) {
+    try {
+        recent.restore(JSON.parse(fs.readFileSync(file, "utf8")));
+    } catch {
+        // Chưa có hoặc hỏng: bắt đầu trống.
+    }
+}
+
+/** Ghi `recent` xuống file nếu có thay đổi chưa ghi (gọi định kỳ và khi tắt bot). */
+export function flushRecent() {
+    clearTimeout(recentSaveTimer);
+    recentSaveTimer = null;
+    if (!recentDirty) return;
+    recentDirty = false;
+    try {
+        writePrivateJson(RECENT_FILE, recent.entries());
+    } catch (error) {
+        log("", "gateway", `Không lưu được bộ nhớ tin gần đây: ${error.message}`);
+    }
+}
+
+function scheduleRecentSave() {
+    recentDirty = true;
+    if (recentSaveTimer) return;
+    recentSaveTimer = setTimeout(flushRecent, RECENT_SAVE_MS);
+    recentSaveTimer.unref?.();
+}
+
 function rememberMessage(account, message) {
     const d = message.data || {};
     recent.remember([`${account}:${d.cliMsgId}`, `${account}:${d.msgId}`], {
         summary: summarize(message),
         sender: message.isSelf ? OWNER : d.dName || "",
     });
+    scheduleRecentSave();
     if (d.msgId) quotable.remember([`${account}:${d.msgId}`], d);
 }
 
@@ -337,12 +374,15 @@ export async function forwardUndo(account, undo) {
 }
 
 /** Reaction thành ghi chú: emoji + tin được thả cảm xúc. */
-export async function forwardReaction(account, reaction) {
+export async function forwardReaction(account, api, reaction) {
     const d = reaction.data || {};
     const ref = (d.content?.rMsg || [])[0] || {};
     const target = recent.get(`${account}:${ref.cMsgID}`) || recent.get(`${account}:${ref.gMsgID}`);
-    const who = reaction.isSelf ? OWNER : d.dName || "";
-    const text = `${reactionEmoji(d.content?.rIcon)}${target ? ` vào tin «${target.summary}»` : ""}`;
+    // Sự kiện reaction thường không có dName: tra tên người thả theo uidFrom.
+    const who = reaction.isSelf
+        ? OWNER
+        : d.dName || (await threadProfile(account, api, { data: { uidFrom: d.uidFrom } }, false)).name;
+    const text = reactionText(d.content?.rIcon, target, Boolean(reaction.isGroup));
     await postEvent(account, reaction.threadId, Boolean(reaction.isGroup), "reaction", who, text, d.msgId);
 }
 

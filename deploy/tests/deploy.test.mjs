@@ -16,7 +16,9 @@ import {
     groupSettingChanges,
     quoteText,
     reactionEmoji,
+    reactionText,
     RecentMessages,
+    summarize,
     systemNoticeText,
 } from "../content.mjs";
 import {
@@ -593,4 +595,32 @@ test("splitVoices: audio thành tin thoại, tệp khác gửi kèm", () => {
         files.map((f) => f.filename),
         ["anh.jpg"],
     );
+});
+
+test("reactionText và summarize: tên người gửi tin, nhãn tệp gọn, tin cũ", () => {
+    const photo = { data: { msgType: "chat.photo", content: { title: "", href: "https://photo-stal.zdn.vn/x.jpg" } } };
+    const file = {
+        data: { msgType: "share.file", content: { title: "kq-sinh-hoa.pdf", href: "https://file-stal.dlfl.vn/x" } },
+    };
+    const video = { data: { msgType: "chat.video.msg", content: { title: "", href: "https://video-stal.dlmd.me/x" } } };
+    assert.equal(summarize(photo), "🖼️ Ảnh");
+    assert.equal(summarize(file), "📎 kq-sinh-hoa.pdf");
+    assert.equal(summarize(video), "🎬 Video");
+    assert.equal(summarize({ data: { content: "chào" } }), "chào");
+    const target = { summary: "📎 kq-sinh-hoa.pdf", sender: "Đỗ Hường" };
+    assert.equal(reactionText("/-heart", target, true), "❤️ vào tin của Đỗ Hường «📎 kq-sinh-hoa.pdf»");
+    assert.equal(reactionText("/-heart", target, false), "❤️ vào tin «📎 kq-sinh-hoa.pdf»");
+    assert.equal(reactionText("", target, false), "Bỏ cảm xúc vào tin «📎 kq-sinh-hoa.pdf»");
+    assert.match(reactionText(":>", undefined, true), /^😆 vào một tin cũ/);
+});
+
+test("RecentMessages: entries/restore giữ thứ tự và bỏ dữ liệu hỏng", () => {
+    const a = new RecentMessages(3);
+    a.remember(["k1", "k2"], { summary: "x" });
+    a.remember(["k3"], { summary: "y" });
+    const b = new RecentMessages(3);
+    b.restore(JSON.parse(JSON.stringify(a.entries())));
+    b.restore("hỏng");
+    b.restore([null, [1, 2]]);
+    assert.deepEqual(b.entries(), a.entries());
 });
