@@ -42,8 +42,8 @@ docker compose restart bot
 -   Sticker: tra ảnh qua `getStickersDetail` rồi gửi như ảnh đính kèm; doodle tải qua `href`.
 -   Link (`chat.recommended`/`recommened.link`), danh thiếp (`recommened.user`), bình chọn (`group.poll`), vị trí (`chat.location.new`), việc cần làm (`chat.todo`): chữ có biểu tượng.
 -   Trích dẫn (`data.quote`): gửi kèm trường `quote` = `Tên: nội dung`.
--   Video (`chat.video.msg`): kèm ảnh xem trước (`content.thumb`), dòng `🎬 Video · m:ss` (thời lượng trong `params`) và link `▶️ Xem:`; chú thích (`title`) giữ lại.
--   Avatar: `thread_avatar` là `fullAvt`/`avt` của nhóm (`getGroupInfo`) hoặc `avatar` của người (`getUserInfo`), nhớ 6 giờ.
+-   Video (`chat.video.msg`): tải file mp4 kèm dòng `🎬 Video · m:ss` (thời lượng trong `params`); chú thích (`title`) giữ lại. Giao diện Libredesk đã vá (`omnichannel/libredesk-ui`) phát video ngay trong khung chat.
+-   Avatar: `thread_avatar` là `fullAvt`/`avt` của nhóm (`getGroupInfo`) hoặc `avatar` của người (`getUserInfo`), nhớ 6 giờ; tin nhóm gửi thêm `sender_avatar` của người gửi.
 -   `undo`, `reaction`, `group_event`: gửi `POST /v1/event`, thành ghi chú nội bộ; nội dung tin bị thu hồi/được thả cảm xúc lấy từ bộ nhớ 4096 tin gần nhất (khoá `tài khoản:cliMsgId`).
 -   Bot bật `selfListen` để thấy tin chủ tài khoản tự gửi từ điện thoại/ứng dụng khác (ghi chú `owner_message`); tin do bot gửi qua `/send` được nhận ra bằng `msgId` trả về hoặc trùng nội dung trong 60 giây và bỏ qua.
 -   `getGroupChatHistory` của zca-js hiện trả 404 nên không dùng.

@@ -88,7 +88,13 @@ export function unregisterAccount(account) {
 
 async function threadFields(account, api, message, isGroup) {
     const profile = await threadProfile(account, api, message, isGroup);
-    return { thread_name: isGroup ? profile.name : message.data?.dName || profile.name, thread_avatar: profile.avatar };
+    // Nhóm: thêm ảnh của người gửi để giao diện hiện avatar từng thành viên.
+    const sender = isGroup ? await threadProfile(account, api, message, false) : profile;
+    return {
+        thread_name: isGroup ? profile.name : message.data?.dName || profile.name,
+        thread_avatar: profile.avatar,
+        sender_avatar: sender.avatar,
+    };
 }
 
 /** Tên và avatar của hội thoại: nhóm thì của nhóm, 1-1 thì của người gửi. Lỗi tra cứu không chặn tin. */
@@ -172,38 +178,18 @@ export function captionOf(message) {
     return CAPTIONED.has(message.data?.msgType) && typeof title === "string" ? title.trim() : "";
 }
 
-/** Libredesk chưa có trình phát video: kèm ảnh xem trước, thời lượng và link mở trên trình duyệt. */
+/** Chú thích video kèm thời lượng; giao diện Libredesk (đã vá) phát video ngay trong khung chat. */
 export function videoText(message) {
-    const c = message.data?.content || {};
     let params = {};
     try {
-        params = typeof c.params === "string" ? JSON.parse(c.params) : {};
+        const raw = message.data?.content?.params;
+        params = typeof raw === "string" ? JSON.parse(raw) : {};
     } catch {
         params = {};
     }
     const seconds = Math.round((Number(params.duration) || 0) / 1000);
     const length = seconds > 0 ? ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : "";
-    const lines = [captionOf(message), `🎬 Video${length}`];
-    if (typeof c.href === "string" && /^https:\/\//.test(c.href)) lines.push(`▶️ Xem: ${c.href}`);
-    return lines.filter(Boolean).join("\n");
-}
-
-/** Ảnh xem trước của video (content.thumb), hoặc null. */
-export async function downloadVideoThumb(message, fetchImpl = fetch) {
-    const thumb = message.data?.content?.thumb;
-    if (message.data?.msgType !== "chat.video.msg" || typeof thumb !== "string" || !/^https:\/\//.test(thumb)) {
-        return null;
-    }
-    const response = await fetchImpl(thumb, { signal: AbortSignal.timeout(30_000) });
-    const contentType = (response.headers.get("content-type") || "").split(";")[0];
-    if (!response.ok || !contentType.startsWith("image/")) return null;
-    const data = Buffer.from(await response.arrayBuffer());
-    if (data.length === 0 || data.length > MAX_FILE_BYTES) return null;
-    return {
-        name: withExtension("xem-truoc-video", contentType),
-        content_type: contentType,
-        data: data.toString("base64"),
-    };
+    return [captionOf(message), `🎬 Video${length}`].filter(Boolean).join("\n");
 }
 
 async function collect(account, api, message) {
@@ -213,11 +199,7 @@ async function collect(account, api, message) {
         const file = (await downloadAttachment(message)) || (await downloadSticker(api, message));
         if (file) {
             text = captionOf(message);
-            if (message.data?.msgType === "chat.video.msg") {
-                const thumb = await downloadVideoThumb(message).catch(() => null);
-                if (thumb) attachments.push(thumb);
-                text = videoText(message);
-            }
+            if (message.data?.msgType === "chat.video.msg") text = videoText(message);
             attachments.push(file);
         }
     } catch (error) {

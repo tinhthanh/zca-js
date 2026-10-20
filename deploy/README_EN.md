@@ -42,8 +42,8 @@ Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer m
 -   Stickers: the image is looked up through `getStickersDetail` and sent as an image attachment; doodles are downloaded from `href`.
 -   Links (`chat.recommended`/`recommened.link`), contact cards (`recommened.user`), polls (`group.poll`), locations (`chat.location.new`) and to-dos (`chat.todo`): text with an icon.
 -   Quotes (`data.quote`): sent as the `quote` field, `Name: text`.
--   Videos (`chat.video.msg`): sent with a preview image (`content.thumb`), a `🎬 Video · m:ss` line (duration from `params`) and a `▶️ Xem:` link; the caption (`title`) is kept.
--   Avatars: `thread_avatar` is the group's `fullAvt`/`avt` (`getGroupInfo`) or the person's `avatar` (`getUserInfo`), cached for 6 hours.
+-   Videos (`chat.video.msg`): the mp4 is attached with a `🎬 Video · m:ss` line (duration from `params`); the caption (`title`) is kept. The patched Libredesk UI (`omnichannel/libredesk-ui`) plays videos inline.
+-   Avatars: `thread_avatar` is the group's `fullAvt`/`avt` (`getGroupInfo`) or the person's `avatar` (`getUserInfo`), cached for 6 hours; group messages also send the sender's `sender_avatar`.
 -   `undo`, `reaction` and `group_event` go to `POST /v1/event` and become private notes; the recalled/reacted message text comes from a cache of the last 4096 messages (key `account:cliMsgId`).
 -   The bot enables `selfListen` to see messages the owner sends from a phone or another app (`owner_message` notes); messages the bot itself sent through `/send` are recognised by the returned `msgId` or by matching text within 60 seconds and skipped.
 -   zca-js `getGroupChatHistory` currently returns 404, so it is not used.
