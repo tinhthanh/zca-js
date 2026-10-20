@@ -177,14 +177,15 @@ async function superviseAccount(name, dir, ctl) {
             accountErrors[name] = describeAccountError(error);
             attempt = Date.now() - started >= STABLE_AFTER_MS ? 1 : attempt + 1;
             // Hết phiên: thử lại một lần (phòng lỗi thoáng qua) rồi dừng, chờ quét QR lại.
-            if (attempt >= (error.sessionExpired ? SESSION_EXPIRED_ATTEMPTS : MAX_ATTEMPTS)) {
+            const limit = error.sessionExpired ? SESSION_EXPIRED_ATTEMPTS : MAX_ATTEMPTS;
+            if (attempt >= limit) {
                 setAccountState(name, "dropped");
                 log(name, "multi", `❌ Bỏ tài khoản sau ${attempt} lần lỗi liên tiếp: ${error.message}`);
                 return false;
             }
             setAccountState(name, "retrying");
             const delay = Math.min(RETRY_BASE_MS * 2 ** (attempt - 1), RETRY_MAX_MS);
-            log(name, "multi", `❌ ${error.message}; thử lại sau ${delay / 1000}s (${attempt}/${MAX_ATTEMPTS}).`);
+            log(name, "multi", `❌ ${error.message}; thử lại sau ${delay / 1000}s (${attempt}/${limit}).`);
             await new Promise((resolve) => setTimeout(resolve, delay));
         }
     }
