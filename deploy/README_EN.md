@@ -17,6 +17,9 @@ deploy/
 ├── gateway.mjs                 # omnichannel gateway link (when GATEWAY_URL is set)
 ├── catchup.mjs                 # recovers messages missed while the bot was down
 ├── accounts.mjs                # /accounts: QR sign-in inside the bot, reconnect, remove
+├── content.mjs                 # turns each Zalo message type into Libredesk content (pure functions)
+├── watchdog.mjs                # cuts sockets silent longer than ZALO_WATCHDOG_STALE_MS
+├── history.mjs                 # per-account connection history (history.json)
 └── tests/deploy.test.mjs       # node:test
 ```
 
@@ -35,7 +38,7 @@ docker compose restart bot
 
 ## 🔗 Omnichannel mode
 
-Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer message is forwarded to the gateway (`POST /v1/inbound`), the bot serves `POST /send` on `BOT_HTTP_PORT` (default 7001) for agent replies, and `/ping`-style commands are disabled (`BOT_COMMANDS=1` to keep them). Groups carry the group name (`getGroupInfo`, cached). Images, files, videos, voice notes and GIFs are downloaded from Zalo's CDN (up to `GATEWAY_MAX_FILE_MB`, default 20 MiB) and sent as base64; stickers and links become a one-line description. Agent files go out through `sendMessage` with `{data, filename, metadata}`; PNG/JPEG/GIF/WebP dimensions are read from the header, so `sharp` is not needed. A `ZaloApiError` with a code (Zalo refused the message) returns 422 so the gateway does not retry; other failures return 502. The full stack lives in the `omnichannel` repository.
+Set `GATEWAY_URL` and `GATEWAY_TOKEN` (at least 32 characters): every customer message is forwarded to the gateway (`POST /v1/inbound`), the bot serves `POST /send` on `BOT_HTTP_PORT` (default 7001) for agent replies, and `/ping`-style commands are disabled (`BOT_COMMANDS=1` to keep them). Groups carry the group name (`getGroupInfo`, cached). Images, files, videos, voice notes and GIFs are downloaded from Zalo's CDN (up to `GATEWAY_MAX_FILE_MB`, default 20 MiB) and sent as base64; stickers and links become a one-line description. Agent files go out through `sendMessage` with `{data, filename, metadata}`; PNG/JPEG/GIF/WebP dimensions are read from the header, so `sharp` is not needed. When each account connects, the bot calls `POST /v1/register` so the gateway creates the inbox early (if that fails, the gateway creates it on the first message). A `ZaloApiError` with a code (Zalo refused the message) returns 422 so the gateway does not retry; other failures return 502. The full stack lives in the `omnichannel` repository.
 
 ### Quoting and recalling agent replies
 
@@ -81,8 +84,8 @@ A successful sign-in writes `credentials.json` (0600) and starts the account rig
 
 ## 🩺 Healthcheck and resources
 
--   Each account's state (`starting`, `running`, `retrying`, `dropped`) is written to `ZALO_HEALTH_FILE`; the container is `healthy` when every account is `running`. The healthcheck uses `grep` so it does not start an extra Node process every minute.
--   A failing account retries with backoff (30 seconds, doubling). Only a really expired session (Zalo rejects the credentials) stops after 2 attempts; network loss is retried forever, at most every 2 minutes, so the account reconnects once the network is back. A socket that dies without a close (network lost mid-connection) is caught by a watchdog: no frame for `ZALO_WATCHDOG_STALE_MS` (compose default 360000 = 6 minutes; Zalo answers its app ping about every 3 minutes; 0 = off) and it is cut and reconnected. `ZALO_WATCHDOG_OBSERVE=1` only logs the longest silence every 15 seconds, to measure before changing the threshold; when every account is dropped the process keeps running so broken sign-ins are not repeated.
+-   Each account's state (`starting`, `running`, `retrying`, `dropped`) is written to `ZALO_HEALTH_FILE`; standalone: the container is `healthy` when every account is `running`; gateway mode: zero accounts is still `healthy`, it passes when no account is `starting`/`retrying`/`dropped`. `ZALO_HEALTH_FILE` defaults to `/tmp/zalo-health.json`. The healthcheck uses `grep` so it does not start an extra Node process every minute.
+-   A failing account retries with backoff (30 seconds, doubling). Only a really expired session (Zalo rejects the credentials) stops after 2 attempts; network loss is retried forever, at most every 2 minutes, so the account reconnects once the network is back. A socket that dies without a close (network lost mid-connection) is caught by a watchdog: no frame for `ZALO_WATCHDOG_STALE_MS` (default 0 = off; the omnichannel compose sets 360000 = 6 minutes; Zalo answers its app ping about every 3 minutes; 0 = off) and it is cut and reconnected. `ZALO_WATCHDOG_OBSERVE=1` only logs the longest silence every 15 seconds, to measure before changing the threshold; when every account is dropped the process keeps running so broken sign-ins are not repeated.
 -   Measured at idle: one account ~27 MiB, each extra account ~8-10 MiB; the login page ~30 MiB. Image 172 MB.
 
 ## 🧪 Tests
@@ -99,4 +102,6 @@ git fetch upstream && git merge upstream/main
 cd deploy && docker compose build && docker compose up -d
 ```
 
-The fork only adds `deploy/`, so merges do not conflict. Upstream APIs the deployment uses: `Zalo` (`login`, `loginQR`), `LoginQRCallbackEventType` (imported from `dist/apis/loginQR.js`), `ThreadType`, `api.listener` (events `connected`, `disconnected`, `closed`, `error`, `message`), `api.sendMessage`, `api.getGroupInfo`, `api.getContext`.
+The fork only adds `deploy/`, so merges do not conflict. Upstream APIs the deployment uses (check them when merging upstream): `Zalo` (`login`, `loginQR`), `LoginQRCallbackEventType` (imported from `dist/apis/loginQR.js`), `ThreadType`, `api.listener` (events `connected`, `disconnected`, `closed`, `error`, `message`, `undo`, `reaction`, `typing`, `seen_messages`, `group_event`, `friend_event`, `old_messages`, `cipher_key`; `requestOldMessages`), `api.sendMessage`, `api.sendVoice`, `api.uploadAttachment`, `api.addReaction`, `api.undo`, `api.findUser`, `api.getUserInfo`, `api.getGroupInfo`, `api.getStickersDetail`, `api.fetchAccountInfo`, `api.getOwnId`, `api.getContext`.
+
+Other environment variables: `LOGIN_PORT` (6081), `ZALO_ACCOUNTS_DIR` (`/data/accounts`), `BOT_PREFIX` (`/`), `BOT_CPUS`/`BOT_MEMORY_LIMIT` (standalone compose).

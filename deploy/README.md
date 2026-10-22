@@ -17,6 +17,9 @@ deploy/
 ├── gateway.mjs                 # nối omnichannel gateway (khi có GATEWAY_URL)
 ├── catchup.mjs                 # lấy lại tin bị lỡ khi bot không chạy
 ├── accounts.mjs                # /accounts: đăng nhập QR trong bot, kết nối lại, gỡ
+├── content.mjs                 # chuyển từng loại tin Zalo thành nội dung Libredesk (hàm thuần)
+├── watchdog.mjs                # cắt socket im lặng quá ZALO_WATCHDOG_STALE_MS
+├── history.mjs                 # lịch sử kết nối từng tài khoản (history.json)
 └── tests/deploy.test.mjs       # node:test
 ```
 
@@ -35,7 +38,7 @@ docker compose restart bot
 
 ## 🔗 Chế độ omnichannel
 
-Đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự): mọi tin khách được chuyển tới gateway (`POST /v1/inbound`), bot mở `POST /send` tại `BOT_HTTP_PORT` (mặc định 7001) để nhận tin nhân viên trả lời, và lệnh `/ping`... bị tắt (`BOT_COMMANDS=1` để bật lại). Nhóm được gửi kèm tên nhóm (`getGroupInfo`, có cache). Ảnh, file, video, voice, GIF được tải từ CDN của Zalo (tối đa `GATEWAY_MAX_FILE_MB`, mặc định 20 MiB) và gửi kèm base64; sticker và link chỉ thành dòng mô tả. File nhân viên gửi đi bằng `sendMessage` với `{data, filename, metadata}`; kích thước ảnh PNG/JPEG/GIF/WebP được đọc từ header nên không cần `sharp`. Lỗi `ZaloApiError` có mã (Zalo từ chối hẳn) trả 422 để gateway không thử lại; lỗi khác trả 502. Stack đầy đủ nằm ở repo `omnichannel`.
+Đặt `GATEWAY_URL` và `GATEWAY_TOKEN` (ít nhất 32 ký tự): mọi tin khách được chuyển tới gateway (`POST /v1/inbound`), bot mở `POST /send` tại `BOT_HTTP_PORT` (mặc định 7001) để nhận tin nhân viên trả lời, và lệnh `/ping`... bị tắt (`BOT_COMMANDS=1` để bật lại). Nhóm được gửi kèm tên nhóm (`getGroupInfo`, có cache). Ảnh, file, video, voice, GIF được tải từ CDN của Zalo (tối đa `GATEWAY_MAX_FILE_MB`, mặc định 20 MiB) và gửi kèm base64; sticker và link chỉ thành dòng mô tả. File nhân viên gửi đi bằng `sendMessage` với `{data, filename, metadata}`; kích thước ảnh PNG/JPEG/GIF/WebP được đọc từ header nên không cần `sharp`. Khi mỗi tài khoản kết nối, bot gọi `POST /v1/register` để gateway tạo inbox sớm (lỗi thì gateway tạo ở tin đầu tiên). Lỗi `ZaloApiError` có mã (Zalo từ chối hẳn) trả 422 để gateway không thử lại; lỗi khác trả 502. Stack đầy đủ nằm ở repo `omnichannel`.
 
 ### Trích dẫn và thu hồi tin nhân viên
 
@@ -81,8 +84,8 @@ Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) c
 
 ## 🩺 Healthcheck và tài nguyên
 
--   Trạng thái từng tài khoản (`starting`, `running`, `retrying`, `dropped`) ghi vào `ZALO_HEALTH_FILE`; container `healthy` khi mọi tài khoản là `running`. Healthcheck dùng `grep` để không khởi động thêm tiến trình Node mỗi phút.
--   Tài khoản lỗi thử lại với backoff (30 giây, nhân đôi). Chỉ phiên hết hạn thật (Zalo từ chối credentials) mới dừng sau 2 lần; mất mạng thì thử lại mãi, tối đa mỗi 2 phút, có mạng lại là tự kết nối. Socket chết mà không báo đóng (mất mạng giữa chừng) được phát hiện bằng watchdog: không nhận frame nào trong `ZALO_WATCHDOG_STALE_MS` (compose mặc định 360000 = 6 phút; Zalo trả ping ứng dụng khoảng 3 phút/lần; 0 = tắt) thì cắt và nối lại. `ZALO_WATCHDOG_OBSERVE=1` chỉ ghi khoảng lặng dài nhất mỗi 15 giây để đo trước khi đổi ngưỡng; khi mọi tài khoản bị bỏ, tiến trình vẫn chạy để không lặp lại đăng nhập hỏng.
+-   Trạng thái từng tài khoản (`starting`, `running`, `retrying`, `dropped`) ghi vào `ZALO_HEALTH_FILE`; chạy riêng: container `healthy` khi mọi tài khoản là `running`; chế độ gateway: chưa có tài khoản vẫn `healthy`, không tài khoản nào `starting`/`retrying`/`dropped` là đạt. `ZALO_HEALTH_FILE` mặc định `/tmp/zalo-health.json`. Healthcheck dùng `grep` để không khởi động thêm tiến trình Node mỗi phút.
+-   Tài khoản lỗi thử lại với backoff (30 giây, nhân đôi). Chỉ phiên hết hạn thật (Zalo từ chối credentials) mới dừng sau 2 lần; mất mạng thì thử lại mãi, tối đa mỗi 2 phút, có mạng lại là tự kết nối. Socket chết mà không báo đóng (mất mạng giữa chừng) được phát hiện bằng watchdog: không nhận frame nào trong `ZALO_WATCHDOG_STALE_MS` (mặc định 0 = tắt; compose của omnichannel đặt 360000 = 6 phút; Zalo trả ping ứng dụng khoảng 3 phút/lần; 0 = tắt) thì cắt và nối lại. `ZALO_WATCHDOG_OBSERVE=1` chỉ ghi khoảng lặng dài nhất mỗi 15 giây để đo trước khi đổi ngưỡng; khi mọi tài khoản bị bỏ, tiến trình vẫn chạy để không lặp lại đăng nhập hỏng.
 -   Đo lúc rảnh: 1 tài khoản ~27 MiB, mỗi tài khoản thêm ~8-10 MiB; trang login ~30 MiB. Image 172 MB.
 
 ## 🧪 Test
@@ -99,4 +102,6 @@ git fetch upstream && git merge upstream/main
 cd deploy && docker compose build && docker compose up -d
 ```
 
-Fork chỉ thêm `deploy/`, nên merge không conflict. Các API upstream mà deploy dùng: `Zalo` (`login`, `loginQR`), `LoginQRCallbackEventType` (import từ `dist/apis/loginQR.js`), `ThreadType`, `api.listener` (sự kiện `connected`, `disconnected`, `closed`, `error`, `message`), `api.sendMessage`, `api.getGroupInfo`, `api.getContext`.
+Fork chỉ thêm `deploy/`, nên merge không conflict. Các API upstream mà deploy dùng (soát khi merge upstream): `Zalo` (`login`, `loginQR`), `LoginQRCallbackEventType` (import từ `dist/apis/loginQR.js`), `ThreadType`, `api.listener` (sự kiện `connected`, `disconnected`, `closed`, `error`, `message`, `undo`, `reaction`, `typing`, `seen_messages`, `group_event`, `friend_event`, `old_messages`, `cipher_key`; `requestOldMessages`), `api.sendMessage`, `api.sendVoice`, `api.uploadAttachment`, `api.addReaction`, `api.undo`, `api.findUser`, `api.getUserInfo`, `api.getGroupInfo`, `api.getStickersDetail`, `api.fetchAccountInfo`, `api.getOwnId`, `api.getContext`.
+
+Biến môi trường khác: `LOGIN_PORT` (6081), `ZALO_ACCOUNTS_DIR` (`/data/accounts`), `BOT_PREFIX` (`/`), `BOT_CPUS`/`BOT_MEMORY_LIMIT` (compose chạy riêng).
