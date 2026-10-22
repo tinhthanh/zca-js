@@ -97,6 +97,8 @@ docker run --rm -v "$PWD":/app/deploy:ro --entrypoint node zalo-bot --test deplo
 
 ## 🔄 Syncing with upstream
 
+The shared process for every fork in the omnichannel system (separate branch, checks, canary, re-pinning, known traps): `omnichannel/docs/UPSTREAM.md`.
+
 ```bash
 git fetch upstream && git merge upstream/main
 cd deploy && docker compose build && docker compose up -d

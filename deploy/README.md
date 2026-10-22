@@ -97,6 +97,8 @@ docker run --rm -v "$PWD":/app/deploy:ro --entrypoint node zalo-bot --test deplo
 
 ## 🔄 Đồng bộ với upstream
 
+Quy trình chung cho mọi fork của hệ thống omnichannel (nhánh riêng, kiểm tra, canary, ghim lại, bẫy đã gặp): `omnichannel/docs/UPSTREAM.md`.
+
 ```bash
 git fetch upstream && git merge upstream/main
 cd deploy && docker compose build && docker compose up -d
