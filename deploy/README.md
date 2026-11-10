@@ -51,6 +51,8 @@ docker compose restart bot
 
 - `typing` và `seen_messages` của khách → `POST /v1/presence` (`typing`, `read` kèm msgId); "đang soạn" gửi tối đa 3 giây/lần mỗi hội thoại.
 - `POST /resolve {account, to}`: số điện thoại (`0…`, `+84…`, có dấu cách) → `findUser` → `{thread_id, name, avatar}` cho tính năng nhắn khách mới.
+- `POST /call/signal {account, path, params, with_imei}`: lệnh báo hiệu cuộc gọi cho `zalo-call` (omnichannel `docs/plan-zalo-call.md`). Bot mã hoá `params` bằng khoá phiên rồi gọi `GET <voice_call>/api/voicecall/<path>`, trả `{ok, data}` đã giải mã; `with_imei: true` thì thêm `imei` của phiên. Chỉ nhận `path` trong danh sách (`requestcall`, `request`, `ringring`, `answer`, `answerack`, `cancel`, `endcall`, `logendcall`, `conf`) và tài khoản trong `ZALO_CALL_ACCOUNTS` (rỗng là tắt; tài khoản khác trả 403). Lỗi Zalo trả 422, lỗi mạng 502. Cookie và khoá không rời bot: mở phiên Zalo thứ hai sẽ làm phiên này chết.
+- Sự kiện điều khiển cuộc gọi (`act_type: "voip"`: `cancel`, `answer`, `answer_ack`, `end_call`...) hiện chỉ ghi một dòng log `[voip]` gồm id, trạng thái và tên khoá (không ghi địa chỉ relay, session). Phiên Web không bao giờ nhận lời mời gọi (thử 10/11/2026).
 
 ### Quản lý tài khoản (/accounts)
 

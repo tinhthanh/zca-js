@@ -22,6 +22,7 @@ import {
     summarize,
     systemNoticeText,
 } from "./content.mjs";
+import { handleCallSignal } from "./call.mjs";
 
 export { describeContent };
 
@@ -769,6 +770,14 @@ async function handleResolve(req, res) {
     }
 }
 
+/** zalo-call gửi lệnh báo hiệu cuộc gọi qua phiên của bot (deploy/call.mjs). */
+async function handleCallSignalRequest(req, res) {
+    if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
+    const payload = await readJSON(req, res);
+    if (!payload) return;
+    await handleCallSignal({ payload, apis, reply, res, log, isPermanent });
+}
+
 /** HTTP cho gateway: POST /send (tin nhân viên) và `extra` (vd. /accounts), cùng token. */
 export function startSendServer(extra = null) {
     if (GATEWAY_TOKEN.length < 32) {
@@ -784,6 +793,8 @@ export function startSendServer(extra = null) {
             handleReact(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/recall") {
             handleRecall(req, res).catch(() => reply(res, 500, "error"));
+        } else if (req.method === "POST" && req.url === "/call/signal") {
+            handleCallSignalRequest(req, res).catch(() => reply(res, 500, "error"));
         } else if (extra && req.headers.authorization === `Bearer ${GATEWAY_TOKEN}`) {
             extra(req, res, reply)
                 .then((handled) => handled || reply(res, 404, "not found"))

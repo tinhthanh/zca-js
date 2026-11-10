@@ -19,3 +19,4 @@ deploy
 !deploy/accounts.mjs
 !deploy/watchdog.mjs
 !deploy/history.mjs
+!deploy/call.mjs

@@ -32,6 +32,7 @@ import {
     sessionExpired,
 } from "../accounts.mjs";
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
+import { CALL_PATHS, callAccounts, ensureVoicecallApi, validateSignal } from "../call.mjs";
 import { watchSocket } from "../watchdog.mjs";
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
@@ -695,4 +696,58 @@ test("voipSummary tolerates unparsed and missing data", () => {
         "act=x keys=[act,act_type,data] data(string)=[]",
     );
     assert.equal(voipSummary(null), "act=? keys=[] data(undefined)=[]");
+});
+
+test("callAccounts parses the allowlist and is empty by default", () => {
+    assert.deepEqual([...callAccounts(" acc2, shop1 ,,")], ["acc2", "shop1"]);
+    assert.equal(callAccounts("").size, 0);
+    assert.equal(callAccounts(undefined).size, 0);
+});
+
+test("validateSignal only lets allowlisted accounts reach known voicecall paths", () => {
+    const allowed = new Set(["acc2"]);
+    assert.equal(validateSignal({ account: "default", path: "cancel", params: {} }, allowed).status, 403);
+    assert.equal(validateSignal({ account: "acc2", path: "../message/send", params: {} }, allowed).status, 400);
+    assert.equal(
+        validateSignal({ account: "acc2", path: "requestcall", params: {} }, allowed).error,
+        "missing calleeId",
+    );
+    assert.equal(validateSignal({ account: "acc2", path: "cancel", params: [] }, allowed).status, 400);
+    assert.deepEqual(
+        validateSignal(
+            { account: "acc2", path: "requestcall", params: { calleeId: "1", callId: 7 }, with_imei: true },
+            allowed,
+        ),
+        { path: "requestcall", params: { calleeId: "1", callId: 7 }, withImei: true },
+    );
+    assert.ok(CALL_PATHS.has("endcall"));
+});
+
+test("ensureVoicecallApi signs params with the session and calls the voice_call host", async () => {
+    const calls = [];
+    const api = {
+        zpwServiceMap: { voice_call: ["https://voicecall-wpa.chat.zalo.me/"] },
+        custom(name, callback) {
+            const ctx = { imei: "imei-1" };
+            const utils = {
+                encodeAES: (text) => `enc(${text})`,
+                makeURL: (base, params) => `${base}?params=${params.params}`,
+                request: async (url, options) => {
+                    calls.push({ url, options });
+                    return "response";
+                },
+                resolve: async (res) => ({ resolved: res }),
+            };
+            Object.defineProperty(this, name, { value: (props) => callback({ ctx, utils, props }) });
+        },
+    };
+    const signal = ensureVoicecallApi(api);
+    assert.equal(ensureVoicecallApi(api), signal, "registers once");
+    const data = await signal({ path: "requestcall", params: { calleeId: "9" }, withImei: true });
+    assert.deepEqual(data, { resolved: "response" });
+    assert.equal(
+        calls[0].url,
+        'https://voicecall-wpa.chat.zalo.me/api/voicecall/requestcall?params=enc({"calleeId":"9","imei":"imei-1"})',
+    );
+    assert.equal(calls[0].options.method, "GET");
 });
