@@ -21,6 +21,7 @@ import {
     RecentMessages,
     summarize,
     systemNoticeText,
+    voipSummary,
 } from "../content.mjs";
 import {
     accountRoutes,
@@ -666,4 +667,32 @@ test("reactionIcon: emoji nhân viên chọn thành mã Zalo, bỏ qua biến th
     assert.equal(reactionIcon(""), "");
     assert.equal(reactionIcon("🦄"), null);
     assert.equal(reactionIcon(null), null);
+});
+
+test("voipSummary prints ids and key names but never relay addresses or sessions", () => {
+    const line = voipSummary({
+        act: "request",
+        act_type: "voip",
+        data: {
+            callId: 464564007,
+            callerId: "123",
+            callType: 1,
+            rtpAddress: "171.244.128.51:4200",
+            session: "sess_secret",
+            extendData: { serverAddr: "10.0.0.1" },
+        },
+    });
+    assert.match(line, /^act=request /);
+    assert.match(line, /callId=464564007/);
+    assert.match(line, /callerId=123/);
+    assert.match(line, /data\(object\)=\[callId,callType,callerId,extendData,rtpAddress,session\]/);
+    assert.doesNotMatch(line, /171\.244|sess_secret|10\.0\.0\.1/);
+});
+
+test("voipSummary tolerates unparsed and missing data", () => {
+    assert.equal(
+        voipSummary({ act: "x", act_type: "voip", data: "not json" }),
+        "act=x keys=[act,act_type,data] data(string)=[]",
+    );
+    assert.equal(voipSummary(null), "act=? keys=[] data(undefined)=[]");
 });

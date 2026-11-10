@@ -160,7 +160,7 @@ export type { VotePollResponse } from "./apis/votePoll.js";
 export type { CustomAPICallback, CustomAPIProps } from "./apis/custom.js";
 
 // Others (Enum)
-export { CloseReason } from "./apis/listen.js";
+export { CloseReason, type VoipControl } from "./apis/listen.js";
 export { LoginQRCallbackEventType } from "./apis/loginQR.js";
 export { FriendRecommendationsType } from "./apis/getFriendRecommendations.js";
 export { ReviewPendingMemberRequestStatus } from "./apis/reviewPendingMemberRequest.js";

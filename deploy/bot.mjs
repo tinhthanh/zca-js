@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { ThreadType, Zalo, ZaloApiError } from "../dist/index.js";
 import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
+import { voipSummary } from "./content.mjs";
 import { watchSocket } from "./watchdog.mjs";
 import { closeCause, ConnectionHistory, HISTORY_FILE } from "./history.mjs";
 import { accountRoutes, describeAccountError, retryDelay, sessionExpired } from "./accounts.mjs";
@@ -172,6 +173,8 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
             );
         });
         listener.on("error", (error) => log(name, "bot", `Lỗi listener: ${error?.message || error}`));
+        // Dò cuộc gọi (giai đoạn 1): chỉ ghi log tóm tắt an toàn để biết phiên Web có nhận lời mời gọi không.
+        listener.on("voip", (control) => log(name, "voip", voipSummary(control)));
         listener.on("message", (message) => {
             if (!catchUp.acceptLive(message)) return;
             if (gatewayEnabled()) void forwardMessage(name, api, message);

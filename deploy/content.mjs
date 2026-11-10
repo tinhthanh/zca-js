@@ -331,3 +331,48 @@ export class RecentMessages {
         }
     }
 }
+
+/** Trường của sự kiện voip được phép in nguyên giá trị: định danh và trạng thái, không có địa chỉ relay/RTP, session hay extendData. */
+const VOIP_SAFE_FIELDS = [
+    "callId",
+    "callerId",
+    "calleeId",
+    "uidFrom",
+    "idTo",
+    "groupId",
+    "callType",
+    "calltype",
+    "type",
+    "typeRequest",
+    "isVideo",
+    "status",
+    "reason",
+    "duration",
+];
+
+/**
+ * Một dòng log cho sự kiện điều khiển cuộc gọi (act_type "voip"), dùng khi dò xem phiên Web có nhận lời mời gọi không.
+ * Chỉ in tên khoá và giá trị của các trường an toàn; payload chưa từng thấy nên đọc khoan dung.
+ */
+export function voipSummary(control) {
+    const content = control && typeof control === "object" ? control : {};
+    const data = content.data && typeof content.data === "object" ? content.data : {};
+    const safe = [];
+    for (const source of [content, data]) {
+        for (const key of VOIP_SAFE_FIELDS) {
+            const value = source[key];
+            if (value == null || typeof value === "object") continue;
+            const text = String(value).slice(0, 40);
+            if (!safe.some((item) => item.startsWith(`${key}=`))) safe.push(`${key}=${text}`);
+        }
+    }
+    const dataKind =
+        typeof content.data === "string" ? "string" : Array.isArray(content.data) ? "array" : typeof content.data;
+    const keys = (obj) => Object.keys(obj).sort().join(",");
+    return [
+        `act=${String(content.act ?? "?").slice(0, 40)}`,
+        ...safe,
+        `keys=[${keys(content)}]`,
+        `data(${dataKind})=[${keys(data)}]`,
+    ].join(" ");
+}

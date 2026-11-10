@@ -33,6 +33,18 @@ export enum CloseReason {
     KickConnection = 3003,
 }
 
+/**
+ * Sự kiện điều khiển cuộc gọi (`act_type == "voip"`) trong frame cmd 601, chưa diễn giải.
+ * `data` đã parse JSON nếu server gửi dạng chuỗi. Có thể chứa địa chỉ relay/RTP và session
+ * của cuộc gọi: không ghi nguyên văn ra log.
+ */
+export type VoipControl = {
+    act: string;
+    act_type: "voip";
+    data: unknown;
+    [key: string]: unknown;
+};
+
 interface ListenerEvents {
     connected: [];
     disconnected: [code: CloseReason, reason: string];
@@ -50,6 +62,7 @@ interface ListenerEvents {
     friend_event: [data: FriendEvent];
     group_event: [data: GroupEvent];
     cipher_key: [key: string];
+    voip: [data: VoipControl];
 }
 
 export class Listener extends EventEmitter<ListenerEvents> {
@@ -324,6 +337,18 @@ export class Listener extends EventEmitter<ListenerEvents> {
                             );
                             if (groupEvent.isSelf && !this.selfListen) continue;
                             this.emit("group_event", groupEvent);
+                        } else if (control.content.act_type == "voip") {
+                            // 10/11/2026: Zalo PC/ZaloCall.exe nhận lời mời gọi qua control act_type "voip".
+                            // Chưa rõ phiên Web có được gửi không, nên chỉ chuyển nguyên trạng ra ngoài.
+                            let data = control.content.data;
+                            if (typeof data == "string") {
+                                try {
+                                    data = JSON.parse(data);
+                                } catch {
+                                    // giữ nguyên chuỗi
+                                }
+                            }
+                            this.emit("voip", { ...control.content, data } as VoipControl);
                         } else if (control.content.act_type == "fr") {
                             // 28/02/2025
                             // Zalo send both req and req_v2 event when user send friend request
