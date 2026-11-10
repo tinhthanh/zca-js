@@ -32,7 +32,7 @@ import {
     sessionExpired,
 } from "../accounts.mjs";
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
-import { CALL_PATHS, callAccounts, ensureVoicecallApi, forwardVoip, validateSignal } from "../call.mjs";
+import { CALL_PATHS, createCallAccounts, ensureVoicecallApi, forwardVoip, validateSignal } from "../call.mjs";
 import { watchSocket } from "../watchdog.mjs";
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
@@ -698,10 +698,29 @@ test("voipSummary tolerates unparsed and missing data", () => {
     assert.equal(voipSummary(null), "act=? keys=[] data(undefined)=[]");
 });
 
-test("callAccounts parses the allowlist and is empty by default", () => {
-    assert.deepEqual([...callAccounts(" acc2, shop1 ,,")], ["acc2", "shop1"]);
-    assert.equal(callAccounts("").size, 0);
-    assert.equal(callAccounts(undefined).size, 0);
+test("call accounts come from the gateway, are cached and survive a gateway outage", async () => {
+    let clock = 0;
+    let calls = 0;
+    let answer = { ok: true, json: async () => ({ zalo_accounts: ["acc2", "shop1"] }) };
+    const fetchImpl = async (url, options) => {
+        calls++;
+        assert.equal(url, "http://gateway:8080/v1/calls/accounts");
+        assert.equal(options.headers.authorization, "Bearer t");
+        if (answer instanceof Error) throw answer;
+        return answer;
+    };
+    const allowed = createCallAccounts({ url: "http://gateway:8080/", token: "t", fetchImpl, now: () => clock });
+    assert.deepEqual([...(await allowed())], ["acc2", "shop1"]);
+    clock += 10_000;
+    await allowed();
+    assert.equal(calls, 1, "cached for 30 s");
+    clock += 30_000;
+    answer = new Error("down");
+    assert.deepEqual([...(await allowed())], ["acc2", "shop1"], "keeps the last list");
+    answer = { ok: true, json: async () => ({ zalo_accounts: [] }) };
+    assert.equal((await allowed()).size, 0, "turned off in the UI");
+    const never = createCallAccounts({ url: "", fetchImpl });
+    assert.equal((await never()).size, 0, "off without a gateway");
 });
 
 test("validateSignal only lets allowlisted accounts reach known voicecall paths", () => {
@@ -758,7 +777,12 @@ test("forwardVoip only sends allowlisted accounts to zalo-call", async () => {
         sent.push({ url, options });
         return { ok: true };
     };
-    const opts = { url: "http://zalo-call:7009/call/event", token: "t", allowed: new Set(["acc2"]), fetchImpl };
+    const opts = {
+        url: "http://zalo-call:7009/call/event",
+        token: "t",
+        allowed: async () => new Set(["acc2"]),
+        fetchImpl,
+    };
     const control = { act: "answer", act_type: "voip", data: { callId: 1 } };
     assert.equal(await forwardVoip("default", control, opts), false);
     assert.equal(await forwardVoip("acc2", control, { ...opts, url: "" }), false);

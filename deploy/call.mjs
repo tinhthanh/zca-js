@@ -15,25 +15,53 @@ export const CALL_PATHS = new Set([
     "conf", // 12006: bật/tắt mic, camera
 ]);
 
-/** Lệnh tạo cuộc gọi mới: chỉ tài khoản trong ZALO_CALL_ACCOUNTS được dùng. */
+/** Lệnh tạo cuộc gọi mới: cần `calleeId`. */
 const DIAL_PATHS = new Set(["requestcall", "request"]);
 
-/** Tài khoản được gọi điện (env ZALO_CALL_ACCOUNTS, phân cách bằng dấu phẩy). Rỗng = tắt tính năng. */
-export function callAccounts(raw = process.env.ZALO_CALL_ACCOUNTS) {
-    return new Set(
-        String(raw || "")
-            .split(",")
-            .map((name) => name.trim())
-            .filter(Boolean),
-    );
+/** Thời gian nhớ danh sách tài khoản được gọi điện lấy từ gateway. */
+export const CALL_ACCOUNTS_TTL_MS = 30_000;
+
+/**
+ * Tài khoản được gọi điện: admin bật/tắt trên trang Tài khoản kênh, gateway lưu và trả qua
+ * `GET /v1/calls/accounts`. Nhớ 30 giây; gateway không trả lời thì dùng danh sách lần trước
+ * (lần đầu là rỗng: không tài khoản nào gọi được).
+ */
+export function createCallAccounts({
+    url = process.env.GATEWAY_URL,
+    token = process.env.GATEWAY_TOKEN,
+    fetchImpl = fetch,
+    now = Date.now,
+} = {}) {
+    let cached = new Set();
+    let fetchedAt = -Infinity;
+    return async function allowedAccounts() {
+        if (now() - fetchedAt < CALL_ACCOUNTS_TTL_MS) return cached;
+        if (!url) return cached;
+        try {
+            const res = await fetchImpl(`${String(url).replace(/\/+$/, "")}/v1/calls/accounts`, {
+                headers: { authorization: `Bearer ${token}` },
+                signal: AbortSignal.timeout(3000),
+            });
+            if (res.ok) {
+                const body = await res.json();
+                cached = new Set(Array.isArray(body?.zalo_accounts) ? body.zalo_accounts.map(String) : []);
+                fetchedAt = now();
+            }
+        } catch {
+            // giữ danh sách cũ
+        }
+        return cached;
+    };
 }
+
+const allowedAccounts = createCallAccounts();
 
 /**
  * Kiểm tra yêu cầu `{account, path, params, with_imei}`. Trả `{error, status}` nếu không hợp lệ,
  * ngược lại `{path, params}` đã chuẩn hoá. Mọi lệnh (không chỉ lệnh gọi) đều cần tài khoản được bật,
  * để tài khoản thật không bao giờ phát sinh lưu lượng gọi điện ngoài ý muốn.
  */
-export function validateSignal(payload, allowed = callAccounts()) {
+export function validateSignal(payload, allowed) {
     if (!payload || typeof payload !== "object") return { status: 400, error: "invalid payload" };
     const { account, path } = payload;
     if (!account || typeof account !== "string") return { status: 400, error: "missing account" };
@@ -67,8 +95,8 @@ export function ensureVoicecallApi(api) {
  * POST /call/signal: `{account, path, params, with_imei}` -> `{ok, data}`.
  * Lỗi Zalo (có mã) trả 422 kèm lý do; lỗi mạng trả 502 để zalo-call tự quyết thử lại.
  */
-export async function handleCallSignal({ payload, apis, reply, res, log, isPermanent }) {
-    const checked = validateSignal(payload);
+export async function handleCallSignal({ payload, apis, reply, res, log, isPermanent, allowed = allowedAccounts }) {
+    const checked = validateSignal(payload, await allowed());
     if (checked.error) return reply(res, checked.status, checked.error);
     const api = apis.get(payload.account);
     if (!api) return reply(res, 404, "unknown account");
@@ -92,7 +120,7 @@ export async function handleCallSignal({ payload, apis, reply, res, log, isPerma
 
 /**
  * Chuyển sự kiện voip (`{act, act_type, data}`) sang zalo-call (`ZALO_CALL_EVENTS_URL`, vd.
- * `http://zalo-call:7009/call/event`). Chỉ tài khoản được bật gọi điện; tài khoản khác không bao giờ rời bot.
+ * `http://zalo-call:7009/call/event`). Chỉ tài khoản được bật gọi điện (gateway); tài khoản khác không bao giờ rời bot.
  * Không chặn listener: lỗi mạng chỉ trả false.
  */
 export async function forwardVoip(
@@ -101,11 +129,11 @@ export async function forwardVoip(
     {
         url = process.env.ZALO_CALL_EVENTS_URL,
         token = process.env.GATEWAY_TOKEN,
-        allowed = callAccounts(),
+        allowed = allowedAccounts,
         fetchImpl = fetch,
     } = {},
 ) {
-    if (!url || !allowed.has(account)) return false;
+    if (!url || !(await allowed()).has(account)) return false;
     try {
         const res = await fetchImpl(url, {
             method: "POST",
