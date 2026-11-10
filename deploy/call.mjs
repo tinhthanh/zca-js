@@ -89,3 +89,32 @@ export async function handleCallSignal({ payload, apis, reply, res, log, isPerma
         );
     }
 }
+
+/**
+ * Chuyển sự kiện voip (`{act, act_type, data}`) sang zalo-call (`ZALO_CALL_EVENTS_URL`, vd.
+ * `http://zalo-call:7009/call/event`). Chỉ tài khoản được bật gọi điện; tài khoản khác không bao giờ rời bot.
+ * Không chặn listener: lỗi mạng chỉ trả false.
+ */
+export async function forwardVoip(
+    account,
+    control,
+    {
+        url = process.env.ZALO_CALL_EVENTS_URL,
+        token = process.env.GATEWAY_TOKEN,
+        allowed = callAccounts(),
+        fetchImpl = fetch,
+    } = {},
+) {
+    if (!url || !allowed.has(account)) return false;
+    try {
+        const res = await fetchImpl(url, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+            body: JSON.stringify({ account, control }),
+            signal: AbortSignal.timeout(3000),
+        });
+        return res.ok;
+    } catch {
+        return false;
+    }
+}

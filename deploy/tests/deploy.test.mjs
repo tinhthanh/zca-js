@@ -32,7 +32,7 @@ import {
     sessionExpired,
 } from "../accounts.mjs";
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
-import { CALL_PATHS, callAccounts, ensureVoicecallApi, validateSignal } from "../call.mjs";
+import { CALL_PATHS, callAccounts, ensureVoicecallApi, forwardVoip, validateSignal } from "../call.mjs";
 import { watchSocket } from "../watchdog.mjs";
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
@@ -750,4 +750,24 @@ test("ensureVoicecallApi signs params with the session and calls the voice_call 
         'https://voicecall-wpa.chat.zalo.me/api/voicecall/requestcall?params=enc({"calleeId":"9","imei":"imei-1"})',
     );
     assert.equal(calls[0].options.method, "GET");
+});
+
+test("forwardVoip only sends allowlisted accounts to zalo-call", async () => {
+    const sent = [];
+    const fetchImpl = async (url, options) => {
+        sent.push({ url, options });
+        return { ok: true };
+    };
+    const opts = { url: "http://zalo-call:7009/call/event", token: "t", allowed: new Set(["acc2"]), fetchImpl };
+    const control = { act: "answer", act_type: "voip", data: { callId: 1 } };
+    assert.equal(await forwardVoip("default", control, opts), false);
+    assert.equal(await forwardVoip("acc2", control, { ...opts, url: "" }), false);
+    assert.equal(sent.length, 0);
+    assert.equal(await forwardVoip("acc2", control, opts), true);
+    assert.equal(sent[0].options.headers.authorization, "Bearer t");
+    assert.deepEqual(JSON.parse(sent[0].options.body), { account: "acc2", control });
+    const failing = async () => {
+        throw new Error("down");
+    };
+    assert.equal(await forwardVoip("acc2", control, { ...opts, fetchImpl: failing }), false);
 });
