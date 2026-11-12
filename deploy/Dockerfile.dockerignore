@@ -20,3 +20,4 @@ deploy
 !deploy/watchdog.mjs
 !deploy/history.mjs
 !deploy/call.mjs
+!deploy/trace.mjs
