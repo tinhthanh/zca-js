@@ -113,7 +113,7 @@ export function describeContent(message) {
         case "chat.todo":
             return joinLines(`✅ Việc cần làm: ${c.title || params.content || ""}`, c.description);
         case "chat.sticker":
-            return "[Sticker]";
+            return MEDIA_LABELS["chat.sticker"];
         case "chat.webcontent": {
             // Thẻ "zinstant" (tài khoản ngân hàng...): chỉ có nhãn và link tới thẻ đã render.
             const label = params.customMsg?.msg?.vi || params.customMsg?.msg?.en || c.title || "Thẻ";
@@ -125,6 +125,12 @@ export function describeContent(message) {
             // Thẻ hệ thống (nhắc hẹn, ...): href chỉ là ảnh nền của thẻ.
             return joinLines(`🎴 ${c.title || "Thẻ"}`, c.description);
         default: {
+            // Tin có tệp mà bot không tải được (quá lớn, link hết hạn): nhãn + link gốc.
+            const media = mediaSummary(message);
+            if (media) {
+                const href = typeof c.href === "string" && /^https?:\/\//.test(c.href) ? c.href : "";
+                return joinLines(media, href);
+            }
             const parts = [c.title, c.description, c.href].filter((v) => typeof v === "string" && v.trim());
             return `[${type}]${parts.length ? " " + parts.join(" ") : ""}`;
         }

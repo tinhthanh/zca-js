@@ -99,9 +99,20 @@ test("describeContent giữ chữ và mô tả file đính kèm", () => {
     assert.equal(describeContent({ data: { content: "xin chào" } }), "xin chào");
     assert.equal(
         describeContent({ data: { msgType: "chat.photo", content: { title: "", href: "https://x/y.jpg" } } }),
-        "[chat.photo] https://x/y.jpg",
+        "🖼️ Ảnh\nhttps://x/y.jpg",
     );
-    assert.equal(describeContent({ data: { msgType: "chat.sticker", content: {} } }), "[Sticker]");
+    assert.equal(describeContent({ data: { msgType: "chat.sticker", content: {} } }), "🧩 Sticker");
+    // Tải tệp thất bại: nhãn, tên/chú thích và link gốc thay cho "[share.file] ...".
+    assert.equal(
+        describeContent({ data: { msgType: "share.file", content: { title: "kq.pdf", href: "https://f/kq.pdf" } } }),
+        "📎 kq.pdf\nhttps://f/kq.pdf",
+    );
+    assert.equal(
+        describeContent({ data: { msgType: "chat.photo", content: { title: "Chào anh", href: "https://x/y.jpg" } } }),
+        "🖼️ Ảnh: Chào anh\nhttps://x/y.jpg",
+    );
+    assert.equal(describeContent({ data: { msgType: "chat.voice", content: { href: "https://v/a.aac" } } }), "🎤 Tin thoại\nhttps://v/a.aac");
+    assert.equal(describeContent({ data: { msgType: "chat.unknown", content: { title: "x" } } }), "[chat.unknown] x");
 });
 
 function png(width, height) {
@@ -217,7 +228,7 @@ test("describeContent hiển thị link, danh thiếp, bình chọn, vị trí, 
     };
     assert.equal(describeContent(place), "📍 Vị trí: Quán\nhttps://maps.google.com/?q=10.77,106.7");
     assert.deepEqual(findCoordinates({ params: "not json" }), null);
-    assert.equal(describeContent({ data: { msgType: "chat.sticker", content: { id: 1, catId: 2 } } }), "[Sticker]");
+    assert.equal(describeContent({ data: { msgType: "chat.sticker", content: { id: 1, catId: 2 } } }), "🧩 Sticker");
     // Thẻ nhắc hẹn ghi từ Zalo desktop: href là ảnh nền, không hiện.
     const ecard = {
         data: {
