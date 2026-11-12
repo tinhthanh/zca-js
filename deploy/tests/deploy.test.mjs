@@ -34,6 +34,7 @@ import {
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
 import { CALL_PATHS, createCallAccounts, ensureVoicecallApi, forwardVoip, validateSignal } from "../call.mjs";
 import { watchSocket } from "../watchdog.mjs";
+import { EventTrace, openTrace, traceAccounts } from "../trace.mjs";
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
     captionOf,
@@ -805,4 +806,22 @@ test("forwardVoip only sends allowlisted accounts to zalo-call", async () => {
         throw new Error("down");
     };
     assert.equal(await forwardVoip("acc2", control, { ...opts, fetchImpl: failing }), false);
+});
+
+test("ZALO_TRACE chỉ ghi tài khoản được chọn, file 0600, dừng ở giới hạn", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ztrace-"));
+    assert.deepEqual([...traceAccounts(" shop1, ,acc2 ")], ["shop1", "acc2"]);
+    assert.equal(openTrace("default", traceAccounts("shop1"), dir), null);
+    const trace = openTrace("shop1", traceAccounts("shop1"), dir);
+    assert.equal(openTrace("shop1", traceAccounts("shop1"), dir), trace);
+    trace.write("message", { data: { msgType: "chat.gif" } });
+    const file = path.join(dir, "shop1.jsonl");
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    const row = JSON.parse(fs.readFileSync(file, "utf8").trim());
+    assert.equal(row.kind, "message");
+    assert.equal(row.payload.data.msgType, "chat.gif");
+    const small = new EventTrace(path.join(dir, "cap.jsonl"), 10);
+    small.write("message", { big: "x".repeat(50) });
+    small.write("message", { more: 1 });
+    assert.equal(fs.readFileSync(path.join(dir, "cap.jsonl"), "utf8").split("\n").filter(Boolean).length, 1);
 });

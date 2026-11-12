@@ -12,6 +12,7 @@ import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
 import { voipSummary } from "./content.mjs";
 import { forwardVoip } from "./call.mjs";
 import { watchSocket } from "./watchdog.mjs";
+import { openTrace } from "./trace.mjs";
 import { closeCause, ConnectionHistory, HISTORY_FILE } from "./history.mjs";
 import { accountRoutes, describeAccountError, retryDelay, sessionExpired } from "./accounts.mjs";
 import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
@@ -179,6 +180,12 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
             log(name, "voip", voipSummary(control));
             void forwardVoip(name, control);
         });
+        const trace = openTrace(name);
+        if (trace) {
+            for (const kind of ["message", "old_messages", "undo", "reaction", "group_event", "friend_event"]) {
+                listener.on(kind, (payload) => trace.write(kind, payload));
+            }
+        }
         listener.on("message", (message) => {
             if (!catchUp.acceptLive(message)) return;
             if (gatewayEnabled()) void forwardMessage(name, api, message);
