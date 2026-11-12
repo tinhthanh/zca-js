@@ -137,15 +137,39 @@ export function describeContent(message) {
     }
 }
 
+/** Thẻ chat.ecard luôn do Zalo tạo (nhắc hẹn, "đã đồng ý kết bạn"...): ghi chú, không phải tin khách. */
+function ecardNotice(data) {
+    const c = data.content && typeof data.content === "object" ? data.content : {};
+    const title = typeof c.title === "string" ? c.title.trim() : "";
+    const description = typeof c.description === "string" ? c.description.trim() : "";
+    const fromZalo = data.uidFrom === "0" || data.dName === "Zalo";
+    if (title.startsWith("⏰") && !fromZalo) {
+        // Thẻ lúc tạo nhắc hẹn; thay cho tin webchat "… tạo nhắc hẹn mới …" (bị bỏ).
+        return joinLines(title, description, data.dName && `Người tạo: ${data.dName}`);
+    }
+    if (!title && description) {
+        const friend = description.match(/^(.+?) just became your friend\.?$/i);
+        if (friend) return `🤝 ${friend[1]} đã trở thành bạn bè`;
+        if (/kết bạn/i.test(description)) return `🤝 ${description}`;
+        return description;
+    }
+    return joinLines(`🎴 ${title || "Thẻ"}`, description);
+}
+
+/** Tin hệ thống webchat trùng với thẻ nhắc hẹn (thẻ có đủ ngày giờ): bỏ qua. */
+export function isRedundantNotice(message) {
+    const data = message.data || {};
+    const c = data.content;
+    if (data.msgType !== "webchat" || !c || typeof c !== "object") return false;
+    return /tạo nhắc hẹn mới/i.test(`${c.title || ""} ${c.description || ""}`);
+}
+
 /** Thông báo hệ thống của Zalo ("Bạn vừa kết bạn với ...") có msgType webchat nhưng
  *  content là object: không phải tin khách, nên thành ghi chú. Trả về chữ hoặc null. */
 export function systemNoticeText(message) {
     const data = message.data || {};
     const c = data.content;
-    if (data.msgType === "chat.ecard" && (data.uidFrom === "0" || data.dName === "Zalo")) {
-        // Nhắc hẹn đến giờ: Zalo tự gửi thẻ vào hội thoại.
-        return describeContent(message);
-    }
+    if (data.msgType === "chat.ecard") return ecardNotice(data);
     if (data.msgType !== "webchat" || !c || typeof c !== "object") return null;
     return [c.title, c.description].filter((v) => typeof v === "string" && v.trim()).join("\n") || null;
 }

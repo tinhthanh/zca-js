@@ -12,6 +12,7 @@ import { ThreadType, ZaloApiError } from "../dist/index.js";
 import { ACCOUNTS_DIR, log, writePrivateJson } from "./common.mjs";
 import {
     describeContent,
+    isRedundantNotice,
     friendEventInfo,
     groupEventText,
     quoteText,
@@ -155,7 +156,25 @@ async function fetchFile(href, fetchImpl) {
     if (declared > MAX_FILE_BYTES) throw new Error("file quá lớn");
     const data = Buffer.from(await response.arrayBuffer());
     if (data.length > MAX_FILE_BYTES) throw new Error("file quá lớn");
-    return { data, contentType: (response.headers.get("content-type") || "application/octet-stream").split(";")[0] };
+    const declaredType = (response.headers.get("content-type") || "application/octet-stream").split(";")[0];
+    return { data, contentType: sniffType(data) || declaredType };
+}
+
+/** Loại file theo byte đầu: CDN của Zalo trả GIF và hình vẽ PNG với content-type image/jpeg. */
+export function sniffType(data) {
+    const head = (n) => data.subarray(0, n).toString("latin1");
+    if (head(6) === "GIF87a" || head(6) === "GIF89a") return "image/gif";
+    if (head(8) === "\x89PNG\r\n\x1a\n") return "image/png";
+    if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
+    if (head(4) === "RIFF" && data.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+    return null;
+}
+
+/** Đổi đuôi tên file cho khớp loại thật (vd. "x.gif" mà là PNG thì thành "x.png"). */
+function matchExtension(name, contentType) {
+    const ext = EXT_BY_TYPE[contentType];
+    if (!ext || !contentType.startsWith("image/")) return name;
+    return name.replace(/\.(jpe?g|png|gif|webp)$/i, `.${ext}`);
 }
 
 /** Ảnh của sticker (Zalo chỉ gửi id/catId): tra URL qua getStickersDetail. */
@@ -185,9 +204,11 @@ export async function downloadAttachment(message, fetchImpl = fetch) {
     if (declared > MAX_FILE_BYTES) throw new Error("file quá lớn");
     const data = Buffer.from(await response.arrayBuffer());
     if (data.length > MAX_FILE_BYTES) throw new Error("file quá lớn");
-    const contentType = (response.headers.get("content-type") || "application/octet-stream").split(";")[0];
+    const declaredType = (response.headers.get("content-type") || "application/octet-stream").split(";")[0];
+    const contentType = sniffType(data) || declaredType;
     const urlName = decodeURIComponent(new URL(href).pathname.split("/").pop() || "");
-    const name = withExtension(kind === "file" && content.title ? content.title : urlName, contentType);
+    const original = kind === "file" && content.title ? content.title : urlName;
+    const name = withExtension(kind === "file" ? original : matchExtension(original, contentType), contentType);
     return { name, content_type: contentType, data: data.toString("base64") };
 }
 
@@ -315,6 +336,7 @@ async function postEvent(account, threadId, isGroup, kind, senderName, text, mes
 export async function forwardMessage(account, api, message) {
     rememberMessage(account, message);
     const isGroup = message.type === ThreadType.Group;
+    if (isRedundantNotice(message)) return;
     const notice = systemNoticeText(message);
     if (notice) {
         // Thông báo hệ thống (kết bạn...) không phải tin khách: ghi chú.

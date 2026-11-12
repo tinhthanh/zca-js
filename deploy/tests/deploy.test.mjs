@@ -21,6 +21,7 @@ import {
     RecentMessages,
     summarize,
     systemNoticeText,
+    isRedundantNotice,
     voipSummary,
 } from "../content.mjs";
 import {
@@ -41,6 +42,7 @@ import {
     describeContent,
     downloadAttachment,
     imageSize,
+    sniffType,
     isBotEcho,
     toAttachmentSource,
     videoText,
@@ -176,6 +178,22 @@ test("downloadAttachment lấy file Zalo, dùng title làm tên file", async () 
     });
     const photo = { data: { msgType: "chat.photo", content: { title: "", href: "https://cdn.zalo/p/img.jpg" } } };
     assert.equal((await downloadAttachment(photo, fakeFetch("J", { "content-type": "image/jpeg" }))).name, "img.jpg");
+});
+
+test("downloadAttachment nhận loại file theo byte đầu (CDN Zalo ghi GIF là image/jpeg)", async () => {
+    const gifBytes = Buffer.from("GIF89a....");
+    const gif = { data: { msgType: "chat.gif", content: { href: "https://zgif-v2.zdn.vn/a.gif" } } };
+    const file = await downloadAttachment(gif, fakeFetch(gifBytes, { "content-type": "image/jpeg" }));
+    assert.equal(file.content_type, "image/gif");
+    assert.equal(file.name, "a.gif");
+    // Hình vẽ: tên .jpg nhưng là PNG.
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+    const doodle = { data: { msgType: "chat.doodle", content: { href: "https://cdn.zalo/d/x.jpg" } } };
+    const drawn = await downloadAttachment(doodle, fakeFetch(pngBytes, { "content-type": "image/jpeg" }));
+    assert.deepEqual([drawn.content_type, drawn.name], ["image/png", "x.png"]);
+    assert.equal(sniffType(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), "image/jpeg");
+    assert.equal(sniffType(Buffer.from("RIFF0000WEBPVP8 ")), "image/webp");
+    assert.equal(sniffType(Buffer.from("%PDF-1.4")), null);
 });
 
 test("downloadAttachment bỏ qua sticker và từ chối file quá lớn", async () => {
@@ -317,7 +335,20 @@ test("systemNoticeText: nhắc hẹn đến giờ do Zalo gửi là thông báo"
         data: { msgType: "chat.ecard", dName, uidFrom: "123", content: { title: "⏰ Họp", description: "23:43" } },
     });
     assert.equal(systemNoticeText(ecard("Zalo")), "🎴 ⏰ Họp\n23:43");
-    assert.equal(systemNoticeText(ecard("An")), null);
+    // Thẻ lúc tạo nhắc hẹn: ghi chú kèm người tạo, thay cho tin webchat "… tạo nhắc hẹn mới …".
+    assert.equal(systemNoticeText(ecard("An")), "⏰ Họp\n23:43\nNgười tạo: An");
+    const created = { data: { msgType: "webchat", content: { title: "An tạo nhắc hẹn mới Họp - 23:43." } } };
+    assert.equal(isRedundantNotice(created), true);
+    assert.equal(isRedundantNotice({ data: { msgType: "webchat", content: { title: "An tạo ghi chú" } } }), false);
+});
+
+test("systemNoticeText: thẻ đã kết bạn là ghi chú, không phải tin khách", () => {
+    const card = (description) => ({
+        data: { msgType: "chat.ecard", dName: "An", uidFrom: "123", content: { title: "", description } },
+    });
+    assert.equal(systemNoticeText(card("Huỳnh Tính Thành just became your friend")), "🤝 Huỳnh Tính Thành đã trở thành bạn bè");
+    assert.equal(systemNoticeText(card("Nguyen Van B đã đồng ý kết bạn")), "🤝 Nguyen Van B đã đồng ý kết bạn");
+    assert.equal(systemNoticeText(card("Thông báo khác")), "Thông báo khác");
 });
 
 test("systemNoticeText nhận ra thông báo hệ thống webchat dạng object", () => {
