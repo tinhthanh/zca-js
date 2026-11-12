@@ -340,6 +340,11 @@ test("systemNoticeText: nhắc hẹn đến giờ do Zalo gửi là thông báo"
     const created = { data: { msgType: "webchat", content: { title: "An tạo nhắc hẹn mới Họp - 23:43." } } };
     assert.equal(isRedundantNotice(created), true);
     assert.equal(isRedundantNotice({ data: { msgType: "webchat", content: { title: "An tạo ghi chú" } } }), false);
+    const english = { data: { msgType: "webchat", content: { title: "An created a new time reminder Họp - 23:43." } } };
+    assert.equal(isRedundantNotice(english), true);
+    // Nhãn cho ghi chú chủ tài khoản gửi GIF/hình vẽ không chú thích.
+    assert.equal(summarize({ data: { msgType: "chat.gif", content: { title: "", href: "https://g/a.gif" } } }), "🖼️ GIF");
+    assert.equal(summarize({ data: { msgType: "chat.doodle", content: { title: "", href: "https://d/x.jpg" } } }), "✏️ Hình vẽ");
 });
 
 test("systemNoticeText: thẻ đã kết bạn là ghi chú, không phải tin khách", () => {

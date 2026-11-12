@@ -349,7 +349,10 @@ export async function forwardMessage(account, api, message) {
             if (d.msgId) sentEchoes.remember([`${account}:${d.msgId}`], { msgId: d.msgId, cliMsgId: d.cliMsgId });
             return;
         }
-        const { text, attachments } = await collect(account, api, message);
+        const collected = await collect(account, api, message);
+        const { attachments } = collected;
+        // Ghi chú không có chú thích: nhãn theo loại tin Zalo (GIF, hình vẽ...), gateway chỉ biết MIME.
+        const text = collected.text.trim() || !attachments.length ? collected.text : summarize(message);
         if (text.trim() || attachments.length) {
             await postEvent(
                 account,

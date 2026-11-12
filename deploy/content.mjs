@@ -161,7 +161,8 @@ export function isRedundantNotice(message) {
     const data = message.data || {};
     const c = data.content;
     if (data.msgType !== "webchat" || !c || typeof c !== "object") return false;
-    return /tạo nhắc hẹn mới/i.test(`${c.title || ""} ${c.description || ""}`);
+    // Zalo dịch theo ngôn ngữ của tài khoản: params.msg có cả mẫu vi và en.
+    return /tạo nhắc hẹn mới|created a new (time )?reminder/i.test(`${c.title || ""} ${c.description || ""}`);
 }
 
 /** Thông báo hệ thống của Zalo ("Bạn vừa kết bạn với ...") có msgType webchat nhưng
