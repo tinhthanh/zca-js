@@ -61,3 +61,19 @@ export function openTrace(account, accounts = traceAccounts(), dir = path.join(A
         return null;
     }
 }
+
+/** Đóng và xoá file trace của một tài khoản vừa gỡ (có hay không có trong ZALO_TRACE). */
+export function removeTrace(account, dir = path.join(ACCOUNTS_DIR, "..", "trace")) {
+    const key = path.join(dir, `${account}.jsonl`);
+    const trace = opened.get(key);
+    if (trace?.fd != null) {
+        try {
+            fs.closeSync(trace.fd);
+        } catch {
+            // Đã đóng.
+        }
+        trace.fd = null;
+    }
+    opened.delete(key);
+    fs.rmSync(key, { force: true });
+}

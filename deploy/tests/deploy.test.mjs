@@ -35,7 +35,7 @@ import {
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
 import { CALL_PATHS, createCallAccounts, ensureVoicecallApi, forwardVoip, validateSignal } from "../call.mjs";
 import { watchSocket } from "../watchdog.mjs";
-import { EventTrace, openTrace, traceAccounts } from "../trace.mjs";
+import { EventTrace, openTrace, removeTrace, traceAccounts } from "../trace.mjs";
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
     captionOf,
@@ -51,6 +51,8 @@ import {
     forwardTyping,
     normalizePhone,
     splitVoices,
+    forgetAccount,
+    restoreRecent,
 } from "../gateway.mjs";
 
 function tempDir() {
@@ -114,7 +116,10 @@ test("describeContent giữ chữ và mô tả file đính kèm", () => {
         describeContent({ data: { msgType: "chat.photo", content: { title: "Chào anh", href: "https://x/y.jpg" } } }),
         "🖼️ Ảnh: Chào anh\nhttps://x/y.jpg",
     );
-    assert.equal(describeContent({ data: { msgType: "chat.voice", content: { href: "https://v/a.aac" } } }), "🎤 Tin thoại\nhttps://v/a.aac");
+    assert.equal(
+        describeContent({ data: { msgType: "chat.voice", content: { href: "https://v/a.aac" } } }),
+        "🎤 Tin thoại\nhttps://v/a.aac",
+    );
     assert.equal(describeContent({ data: { msgType: "chat.unknown", content: { title: "x" } } }), "[chat.unknown] x");
 });
 
@@ -343,15 +348,24 @@ test("systemNoticeText: nhắc hẹn đến giờ do Zalo gửi là thông báo"
     const english = { data: { msgType: "webchat", content: { title: "An created a new time reminder Họp - 23:43." } } };
     assert.equal(isRedundantNotice(english), true);
     // Nhãn cho ghi chú chủ tài khoản gửi GIF/hình vẽ không chú thích.
-    assert.equal(summarize({ data: { msgType: "chat.gif", content: { title: "", href: "https://g/a.gif" } } }), "🖼️ GIF");
-    assert.equal(summarize({ data: { msgType: "chat.doodle", content: { title: "", href: "https://d/x.jpg" } } }), "✏️ Hình vẽ");
+    assert.equal(
+        summarize({ data: { msgType: "chat.gif", content: { title: "", href: "https://g/a.gif" } } }),
+        "🖼️ GIF",
+    );
+    assert.equal(
+        summarize({ data: { msgType: "chat.doodle", content: { title: "", href: "https://d/x.jpg" } } }),
+        "✏️ Hình vẽ",
+    );
 });
 
 test("systemNoticeText: thẻ đã kết bạn là ghi chú, không phải tin khách", () => {
     const card = (description) => ({
         data: { msgType: "chat.ecard", dName: "An", uidFrom: "123", content: { title: "", description } },
     });
-    assert.equal(systemNoticeText(card("Huỳnh Tính Thành just became your friend")), "🤝 Huỳnh Tính Thành đã trở thành bạn bè");
+    assert.equal(
+        systemNoticeText(card("Huỳnh Tính Thành just became your friend")),
+        "🤝 Huỳnh Tính Thành đã trở thành bạn bè",
+    );
     assert.equal(systemNoticeText(card("Nguyen Van B đã đồng ý kết bạn")), "🤝 Nguyen Van B đã đồng ý kết bạn");
     assert.equal(systemNoticeText(card("Thông báo khác")), "Thông báo khác");
 });
@@ -860,4 +874,108 @@ test("ZALO_TRACE chỉ ghi tài khoản được chọn, file 0600, dừng ở g
     small.write("message", { big: "x".repeat(50) });
     small.write("message", { more: 1 });
     assert.equal(fs.readFileSync(path.join(dir, "cap.jsonl"), "utf8").split("\n").filter(Boolean).length, 1);
+});
+
+test("RecentMessages.forget bỏ đúng khoá của một tài khoản", () => {
+    const r = new RecentMessages(10);
+    r.remember(["acc2:1", "acc2:2"], { summary: "của acc2" });
+    r.remember(["shop1:1"], { summary: "của shop1" });
+    assert.equal(r.forget("acc2:"), 2);
+    assert.equal(r.get("acc2:1"), undefined);
+    assert.equal(r.get("shop1:1").summary, "của shop1");
+});
+
+test("forgetAccount xoá tin của tài khoản đã gỡ khỏi recent-messages.json, giữ tài khoản khác", () => {
+    const dir = tempDir();
+    const file = path.join(dir, "recent-messages.json");
+    writePrivateJson(file, [
+        ["acc2:11", { summary: "tin của acc2", sender: "Khách" }],
+        ["shop1:22", { summary: "tin của shop1", sender: "Khách" }],
+    ]);
+    restoreRecent(file);
+    forgetAccount("acc2", file);
+    const saved = fs.readFileSync(file, "utf8");
+    assert.ok(!saved.includes("tin của acc2"));
+    assert.ok(saved.includes("tin của shop1"));
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("removeTrace đóng và xoá file trace của tài khoản", () => {
+    const dir = tempDir();
+    const trace = openTrace("acc2", new Set(["acc2"]), dir);
+    trace.write("message", { text: "x" });
+    removeTrace("acc2", dir);
+    assert.equal(fs.existsSync(path.join(dir, "acc2.jsonl")), false);
+    trace.write("message", { text: "sau khi gỡ" }); // không lỗi, không ghi
+    assert.equal(fs.existsSync(path.join(dir, "acc2.jsonl")), false);
+    removeTrace("chua-co", dir); // không có file: không lỗi
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("accountRoutes: gỡ tài khoản quên luôn dữ liệu ngoài thư mục của nó", async () => {
+    const dir = tempDir();
+    const calls = [];
+    const manager = {
+        list: () => [],
+        stop: async (name) => calls.push(["stop", name]),
+        restart: async (name) => calls.push(["restart", name]),
+        forget: async (name) => calls.push(["forget", name]),
+    };
+    const handle = accountRoutes(manager, { accountsDir: dir });
+    fs.mkdirSync(path.join(dir, "acc2"));
+    const res = {
+        status: 0,
+        writeHead(s) {
+            this.status = s;
+        },
+        end() {},
+    };
+    await handle({ method: "DELETE", url: "/accounts/acc2" }, res, () => {});
+    assert.equal(res.status, 204);
+    assert.deepEqual(calls, [
+        ["stop", "acc2"],
+        ["forget", "acc2"],
+    ]);
+    assert.equal(fs.existsSync(path.join(dir, "acc2")), false);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("accountRoutes: QR quét xong sau khi tài khoản đã gỡ thì không lưu, không chạy lại", async () => {
+    const dir = tempDir();
+    const calls = [];
+    const manager = {
+        list: () => [],
+        stop: async (name) => calls.push(["stop", name]),
+        restart: async (name) => calls.push(["restart", name]),
+    };
+    let scanned;
+    const fakeZalo = () => ({
+        // Chưa phát "QR generated" nên phiên chưa có abort: gỡ không huỷ được phía zca-js.
+        loginQR: () =>
+            new Promise((resolve) => {
+                scanned = () =>
+                    resolve({
+                        getContext: () => ({
+                            cookie: { toJSON: () => ({ cookies: [{ key: "a" }] }) },
+                            imei: "i",
+                            userAgent: "u",
+                        }),
+                    });
+            }),
+    });
+    const handle = accountRoutes(manager, { createZalo: fakeZalo, accountsDir: dir });
+    const res = () => ({
+        status: 0,
+        writeHead(s) {
+            this.status = s;
+        },
+        end() {},
+    });
+    await handle({ method: "POST", url: "/accounts/acc2/login" }, res(), () => {});
+    await handle({ method: "DELETE", url: "/accounts/acc2" }, res(), () => {});
+    scanned();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(fs.existsSync(path.join(dir, "acc2", "credentials.json")), false);
+    assert.deepEqual(calls, [["stop", "acc2"]]);
+    fs.rmSync(dir, { recursive: true, force: true });
 });

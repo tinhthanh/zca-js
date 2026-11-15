@@ -350,6 +350,17 @@ export class RecentMessages {
     get(key) {
         return key ? this.items.get(key) : undefined;
     }
+    /** Bỏ mọi khoá bắt đầu bằng prefix (vd. `${account}:` của tài khoản vừa gỡ); trả về số khoá bỏ. */
+    forget(prefix) {
+        let n = 0;
+        for (const key of [...this.items.keys()]) {
+            if (key.startsWith(prefix)) {
+                this.items.delete(key);
+                n++;
+            }
+        }
+        return n;
+    }
     /** Các cặp [key, value] để lưu xuống file (cũ trước, mới sau). */
     entries() {
         return [...this.items];
