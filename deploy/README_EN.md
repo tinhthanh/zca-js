@@ -64,7 +64,7 @@ With the gateway enabled, the bot's HTTP server (same `GATEWAY_TOKEN` as `/send`
 | `POST /accounts/<name>/login` | Start a QR sign-in inside the bot (up to `MAX_QR` codes) |
 | `GET /accounts/<name>/login` | Status: `qr` (with a `data:image/png` image), `scanned`, `confirming`, `success`, `error` |
 | `POST /accounts/<name>/restart` | Reconnect |
-| `DELETE /accounts/<name>` | Stop and delete the account directory |
+| `DELETE /accounts/<name>` | Stop and delete the account directory, with the account's remembered messages in `recent-messages.json` and its trace file. A pending QR login scanned afterwards is dropped and doesn't recreate the account |
 
 A successful sign-in writes `credentials.json` (0600) and starts the account right away, no restart needed. In gateway mode the bot also starts with no accounts so they can be added from the UI; standalone (no gateway) still needs at least one account.
 

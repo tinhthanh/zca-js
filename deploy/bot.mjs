@@ -12,7 +12,7 @@ import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
 import { voipSummary } from "./content.mjs";
 import { forwardVoip } from "./call.mjs";
 import { watchSocket } from "./watchdog.mjs";
-import { openTrace } from "./trace.mjs";
+import { openTrace, removeTrace } from "./trace.mjs";
 import { closeCause, ConnectionHistory, HISTORY_FILE } from "./history.mjs";
 import { accountRoutes, describeAccountError, retryDelay, sessionExpired } from "./accounts.mjs";
 import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
@@ -24,6 +24,7 @@ import {
     forwardMessage,
     forwardReaction,
     flushRecent,
+    forgetAccount,
     forwardUndo,
     gatewayEnabled,
     registerAccount,
@@ -106,16 +107,23 @@ async function runAccount(name, dir, ctl) {
     ctl.listener = listener;
     if (ctl.stopped) return;
     if (gatewayEnabled()) await registerAccount(name, api);
+    let profile = {};
     try {
-        const profile = (await api.fetchAccountInfo())?.profile || {};
-        accountProfiles[name] = {
-            uid: api.getOwnId(),
-            displayName: profile.displayName || "",
-            avatar: profile.avatar || "",
-        };
+        profile = (await api.fetchAccountInfo())?.profile || {};
     } catch {
-        accountProfiles[name] = { uid: api.getOwnId(), displayName: "", avatar: "" };
+        // Không lấy được hồ sơ: chỉ còn uid.
     }
+    // Gỡ hay dừng trong lúc chờ đăng ký và hồ sơ (tới 30 s): không mở listener, kẻo nó chạy
+    // ngoài danh sách tài khoản và ghi lại thư mục vừa xoá.
+    if (ctl.stopped) {
+        unregisterAccount(name);
+        return;
+    }
+    accountProfiles[name] = {
+        uid: api.getOwnId(),
+        displayName: profile.displayName || "",
+        avatar: profile.avatar || "",
+    };
 
     const catchUp = new CatchUp(path.join(dir, "catchup.json"));
     try {
@@ -135,6 +143,7 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
             resolve();
         };
         listener.on("connected", () => {
+            if (ctl.stopped) return;
             delete accountErrors[name];
             historyOf(name).record("connected", "Đã kết nối");
             // Kết nối chết không có gói đóng (mất mạng): tự phát hiện bằng ping/pong.
@@ -161,6 +170,9 @@ function listenUntilClosed(name, api, listener, catchUp, ctl) {
         });
         listener.on("disconnected", (code) => {
             stopWatchdog();
+            // Socket đóng sau khi tài khoản đã dừng (stop() đóng bất đồng bộ): tài khoản có thể vừa
+            // bị gỡ, ghi lịch sử lúc này sẽ tạo lại thư mục của nó.
+            if (ctl.stopped) return;
             const cause = closeCause(code);
             historyOf(name).record(cause.kind, cause.message);
             log(name, "bot", `Mất kết nối (code ${code}), listener tự thử lại.`);
@@ -304,6 +316,10 @@ const manager = {
         }));
     },
     stop: stopAccount,
+    forget: (name) => {
+        forgetAccount(name);
+        removeTrace(name);
+    },
     restart: async (name) => {
         await stopAccount(name);
         historyOf(name).record("manual", "Khởi động lại tài khoản (đăng nhập lại hoặc bấm Kết nối lại)");

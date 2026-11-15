@@ -64,7 +64,7 @@ Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) c
 | `POST /accounts/<tên>/login` | Bắt đầu đăng nhập QR ngay trong bot (tối đa `MAX_QR` mã) |
 | `GET /accounts/<tên>/login` | Trạng thái: `qr` (kèm ảnh `data:image/png`), `scanned`, `confirming`, `success`, `error` |
 | `POST /accounts/<tên>/restart` | Kết nối lại |
-| `DELETE /accounts/<tên>` | Dừng và xoá thư mục tài khoản |
+| `DELETE /accounts/<tên>` | Dừng và xoá thư mục tài khoản, cùng tin đã nhớ của tài khoản trong `recent-messages.json` và file trace. Đăng nhập QR đang chờ mà quét xong sau đó thì bị bỏ, không tạo lại tài khoản |
 
 Đăng nhập thành công thì lưu `credentials.json` (0600) và chạy tài khoản ngay, không cần restart. Bot vẫn khởi động khi chưa có tài khoản nào (chế độ gateway) để thêm từ giao diện; chạy riêng không gateway thì vẫn cần ít nhất một tài khoản.
 

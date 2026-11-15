@@ -131,6 +131,11 @@ export function accountRoutes(
             try {
                 const api = await createZalo().loginQR({}, (event) => session.onEvent(event));
                 if (!api) throw new Error("đăng nhập bị huỷ");
+                // Tài khoản đã gỡ (hoặc có phiên QR mới) trong lúc chờ quét: không lưu, không chạy lại.
+                if (sessions.get(name) !== session) {
+                    log(name, "accounts", "Bỏ kết quả đăng nhập QR: tài khoản đã gỡ trong lúc chờ.");
+                    return;
+                }
                 const context = api.getContext();
                 writePrivateJson(path.join(accountsDir, name, CREDENTIALS_FILE), {
                     cookie: context.cookie.toJSON()?.cookies || [],
@@ -163,8 +168,12 @@ export function accountRoutes(
         }
         sessions.delete(name);
         await manager.stop(name);
+        // Phần dọn của tài khoản vừa dừng (ghi catchup.json) chạy ở lượt sau: đợi nó rồi mới xoá.
+        await new Promise((resolve) => setImmediate(resolve));
         fs.rmSync(path.join(accountsDir, name), { recursive: true, force: true });
-        log(name, "accounts", "Đã gỡ tài khoản và xoá dữ liệu đăng nhập.");
+        // Dữ liệu của tài khoản nằm ngoài thư mục của nó: tóm tắt tin, trace.
+        await manager.forget?.(name);
+        log(name, "accounts", "Đã gỡ tài khoản, xoá dữ liệu đăng nhập và tin đã nhớ.");
     }
 
     /** true nếu đã trả lời request. */

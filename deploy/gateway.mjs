@@ -106,6 +106,24 @@ export function unregisterAccount(account) {
     apis.delete(account);
 }
 
+/**
+ * Quên mọi thứ bot nhớ về một tài khoản vừa gỡ: tóm tắt tin (cả trong recent-messages.json, ghi
+ * ngay), tin để trích dẫn, tin bot đã gửi hay thu hồi, hồ sơ, cài đặt nhóm.
+ */
+export function forgetAccount(account, file = RECENT_FILE) {
+    const prefix = `${account}:`;
+    apis.delete(account);
+    for (const map of [profiles, groupSettings, lastTyping]) {
+        for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
+    }
+    for (const store of [botSent, quotable, sentEchoes, botRecalled]) store.forget(prefix);
+    pendingEchoes = pendingEchoes.filter((p) => p.account !== account);
+    if (recent.forget(prefix) > 0) {
+        recentDirty = true;
+        flushRecent(file);
+    }
+}
+
 async function threadFields(account, api, message, isGroup) {
     const profile = await threadProfile(account, api, message, isGroup);
     // Nhóm: thêm ảnh của người gửi để giao diện hiện avatar từng thành viên.
@@ -259,13 +277,13 @@ export function restoreRecent(file = RECENT_FILE) {
 }
 
 /** Ghi `recent` xuống file nếu có thay đổi chưa ghi (gọi định kỳ và khi tắt bot). */
-export function flushRecent() {
+export function flushRecent(file = RECENT_FILE) {
     clearTimeout(recentSaveTimer);
     recentSaveTimer = null;
     if (!recentDirty) return;
     recentDirty = false;
     try {
-        writePrivateJson(RECENT_FILE, recent.entries());
+        writePrivateJson(file, recent.entries());
     } catch (error) {
         log("", "gateway", `Không lưu được bộ nhớ tin gần đây: ${error.message}`);
     }
