@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { LoginQRCallbackEventType } from "../dist/apis/loginQR.js";
 import { Zalo } from "../dist/index.js";
-import { ACCOUNTS_DIR, ACCOUNT_NAME_PATTERN, CREDENTIALS_FILE, log, onlyAccount, writePrivateJson } from "./common.mjs";
+import { ACCOUNTS_DIR, ACCOUNT_NAME_PATTERN, CREDENTIALS_FILE, log, writePrivateJson } from "./common.mjs";
 
 const MAX_QR = Number(process.env.MAX_QR || 5); // mỗi mã QR sống ~100 giây
 const SESSION_KEEP_MS = 10 * 60 * 1000; // giữ kết quả để giao diện kịp đọc
@@ -109,11 +109,7 @@ export class LoginSession {
  */
 export function accountRoutes(
     manager,
-    {
-        createZalo = () => new Zalo({ checkUpdate: false, logging: false }),
-        accountsDir = ACCOUNTS_DIR,
-        only = onlyAccount(),
-    } = {},
+    { createZalo = () => new Zalo({ checkUpdate: false, logging: false }), accountsDir = ACCOUNTS_DIR } = {},
 ) {
     const sessions = new Map();
 
@@ -158,10 +154,7 @@ export function accountRoutes(
     }
 
     function list() {
-        return manager
-            .list()
-            .filter((a) => !only || a.name === only)
-            .map((a) => ({ ...a, login: sessionFor(a.name)?.toJSON() || null }));
+        return manager.list().map((a) => ({ ...a, login: sessionFor(a.name)?.toJSON() || null }));
     }
 
     async function remove(name) {
@@ -199,11 +192,6 @@ export function accountRoutes(
         const name = parts[1];
         if (!ACCOUNT_NAME_PATTERN.test(name || "")) {
             reply(res, 400, "invalid account name");
-            return true;
-        }
-        // Chế độ một tài khoản: pod này không biết tài khoản nào khác (không đăng nhập, không gỡ).
-        if (only && name !== only) {
-            reply(res, 404, "unknown account");
             return true;
         }
         const action = parts[2] || "";
