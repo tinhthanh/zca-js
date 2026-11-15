@@ -15,7 +15,7 @@ import { watchSocket } from "./watchdog.mjs";
 import { openTrace, removeTrace } from "./trace.mjs";
 import { closeCause, ConnectionHistory, HISTORY_FILE } from "./history.mjs";
 import { accountRoutes, describeAccountError, retryDelay, sessionExpired } from "./accounts.mjs";
-import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, readCredentials } from "./common.mjs";
+import { ACCOUNTS_DIR, CREDENTIALS_FILE, discoverAccounts, log, onlyAccount, readCredentials } from "./common.mjs";
 import {
     forwardFriendEvent,
     forwardSeen,
@@ -304,9 +304,12 @@ async function stopAccount(name) {
     log(name, "multi", "Đã dừng tài khoản.");
 }
 
+const ONLY_ACCOUNT = onlyAccount();
 const manager = {
     list: () => {
         const names = new Set([...discoverAccounts().map((a) => a.name), ...Object.keys(accountStates)]);
+        // Chế độ một tài khoản: tài khoản của pod luôn hiện, kể cả khi chưa đăng nhập.
+        if (ONLY_ACCOUNT) names.add(ONLY_ACCOUNT);
         return [...names].sort().map((name) => ({
             name,
             state: accountStates[name] || "stopped",
