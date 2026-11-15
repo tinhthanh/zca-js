@@ -4,6 +4,16 @@ import path from "node:path";
 
 export const ACCOUNTS_DIR = process.env.ZALO_ACCOUNTS_DIR || "/data/accounts";
 export const ACCOUNT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+
+/**
+ * Chế độ một tài khoản (omi, D27: mỗi kênh một pod): BOT_ACCOUNT là tên tài khoản duy nhất
+ * bot chạy và nhận lệnh; tài khoản khác coi như không có. Trống: mọi tài khoản trong thư mục.
+ */
+export function onlyAccount(value = process.env.BOT_ACCOUNT || "") {
+    const name = value.trim();
+    if (name && !ACCOUNT_NAME_PATTERN.test(name)) throw new Error(`BOT_ACCOUNT không hợp lệ: ${JSON.stringify(name)}`);
+    return name;
+}
 export const CREDENTIALS_FILE = "credentials.json";
 
 export function log(label, tag, message) {
@@ -51,7 +61,7 @@ export function writePrivateJson(file, data) {
     }
 }
 
-export function discoverAccounts(root = ACCOUNTS_DIR) {
+export function discoverAccounts(root = ACCOUNTS_DIR, only = onlyAccount()) {
     if (!fs.existsSync(root)) return [];
     return fs
         .readdirSync(root, { withFileTypes: true })
@@ -59,6 +69,7 @@ export function discoverAccounts(root = ACCOUNTS_DIR) {
         .map((entry) => entry.name)
         .sort()
         .filter((name) => {
+            if (only && name !== only) return false;
             if (!fs.existsSync(path.join(root, name, CREDENTIALS_FILE))) return false;
             if (ACCOUNT_NAME_PATTERN.test(name)) return true;
             log("", "multi", `Bỏ qua thư mục tài khoản có tên không hợp lệ: ${JSON.stringify(name)}`);
