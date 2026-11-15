@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { LoginQRCallbackEventType } from "../../dist/apis/loginQR.js";
 import { FriendEventType, ThreadType } from "../../dist/index.js";
 
-import { discoverAccounts, isValidCredentials, readCredentials, writePrivateJson } from "../common.mjs";
+import { discoverAccounts, isValidCredentials, onlyAccount, readCredentials, writePrivateJson } from "../common.mjs";
 import {
     findCoordinates,
     friendEventInfo,
@@ -977,5 +977,58 @@ test("accountRoutes: QR quét xong sau khi tài khoản đã gỡ thì không l�
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(fs.existsSync(path.join(dir, "acc2", "credentials.json")), false);
     assert.deepEqual(calls, [["stop", "acc2"]]);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("BOT_ACCOUNT: chỉ tìm thấy đúng tài khoản của pod, tên sai thì không chạy", () => {
+    const dir = tempDir();
+    for (const name of ["vetgo-uat.acc2", "vetgo-uat.shop1"]) {
+        writePrivateJson(path.join(dir, name, "credentials.json"), credentials);
+    }
+    assert.deepEqual(
+        discoverAccounts(dir, "vetgo-uat.acc2").map((a) => a.name),
+        ["vetgo-uat.acc2"],
+    );
+    assert.equal(discoverAccounts(dir, "").length, 2);
+    assert.equal(onlyAccount(" vetgo-uat.acc2 "), "vetgo-uat.acc2");
+    assert.equal(onlyAccount(""), "");
+    assert.throws(() => onlyAccount("../etc"));
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("accountRoutes một tài khoản: tài khoản khác không đăng nhập, không gỡ được, không hiện", async () => {
+    const dir = tempDir();
+    const calls = [];
+    const manager = {
+        list: () => [
+            { name: "a.acc2", state: "running" },
+            { name: "a.shop1", state: "running" },
+        ],
+        stop: async (name) => calls.push(["stop", name]),
+        restart: async (name) => calls.push(["restart", name]),
+    };
+    const handle = accountRoutes(manager, { accountsDir: dir, only: "a.acc2" });
+    const call = async (method, url) => {
+        const res = {
+            status: 0,
+            body: "",
+            writeHead(s) {
+                this.status = s;
+            },
+            end(b = "") {
+                this.body = b;
+            },
+        };
+        await handle({ method, url }, res, (r, status, body) => r.writeHead(status) || r.end(body));
+        return res;
+    };
+    assert.deepEqual(
+        JSON.parse((await call("GET", "/accounts")).body).map((a) => a.name),
+        ["a.acc2"],
+    );
+    assert.equal((await call("POST", "/accounts/a.shop1/login")).status, 404);
+    assert.equal((await call("DELETE", "/accounts/a.shop1")).status, 404);
+    assert.equal((await call("POST", "/accounts/a.shop1/restart")).status, 404);
+    assert.deepEqual(calls, []);
     fs.rmSync(dir, { recursive: true, force: true });
 });
