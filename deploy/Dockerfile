@@ -26,4 +26,11 @@ ENV NODE_ENV=production \
     ZALO_ACCOUNTS_DIR=/data/accounts \
     ZALO_HEALTH_FILE=/tmp/zalo-health.json
 
+# Container của từng tài khoản trên máy omi không có healthcheck trong compose: healthy khi file
+# health đã có và không tài khoản nào starting/retrying/dropped (chưa có tài khoản vẫn healthy).
+# Dùng grep thay vì node để không khởi động thêm tiến trình Node mỗi phút. Compose có thể ghi đè;
+# container chạy login.mjs thì tắt healthcheck này (healthcheck: disable).
+HEALTHCHECK --interval=60s --timeout=5s --start-period=120s --retries=2 \
+    CMD test -f "$ZALO_HEALTH_FILE" && ! grep -qE '"(starting|retrying|dropped)"' "$ZALO_HEALTH_FILE"
+
 CMD ["node", "deploy/bot.mjs"]

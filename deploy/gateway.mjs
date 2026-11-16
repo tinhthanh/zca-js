@@ -196,7 +196,7 @@ function matchExtension(name, contentType) {
 }
 
 /** Ảnh của sticker (Zalo chỉ gửi id/catId): tra URL qua getStickersDetail. */
-export async function downloadSticker(api, message, fetchImpl = fetch) {
+async function downloadSticker(api, message, fetchImpl = fetch) {
     const content = message.data?.content;
     if (message.data?.msgType !== "chat.sticker" || !content?.id) return null;
     const [detail] = await api.getStickersDetail([Number(content.id)]);

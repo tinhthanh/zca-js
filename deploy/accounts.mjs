@@ -19,7 +19,7 @@ export function sessionExpired(error) {
     return error;
 }
 
-export const SESSION_EXPIRED_ATTEMPTS = 2;
+const SESSION_EXPIRED_ATTEMPTS = 2;
 const RETRY_BASE_MS = 30_000;
 const RETRY_MAX_MS = 600_000;
 // Mất mạng / lỗi kết nối: không bao giờ bỏ tài khoản, thử lại tối đa mỗi 2 phút
@@ -201,7 +201,7 @@ export function accountRoutes(
             reply(res, 400, "invalid account name");
             return true;
         }
-        // Chế độ một tài khoản: pod này không biết tài khoản nào khác (không đăng nhập, không gỡ).
+        // Chế độ một tài khoản: container này không biết tài khoản nào khác (không đăng nhập, không gỡ).
         if (only && name !== only) {
             reply(res, 404, "unknown account");
             return true;

@@ -11,7 +11,7 @@ import { ThreadType, Zalo, ZaloApiError } from "../dist/index.js";
 import { CatchUp, isRecall, recallOf } from "./catchup.mjs";
 import { voipSummary } from "./content.mjs";
 import { forwardVoip } from "./call.mjs";
-import { watchSocket } from "./watchdog.mjs";
+import { watchdogStaleMs, watchSocket } from "./watchdog.mjs";
 import { openTrace, removeTrace } from "./trace.mjs";
 import { closeCause, ConnectionHistory, HISTORY_FILE } from "./history.mjs";
 import { accountRoutes, describeAccountError, retryDelay, sessionExpired } from "./accounts.mjs";
@@ -39,9 +39,9 @@ const COMMANDS_ENABLED =
 const PREFIX = process.env.BOT_PREFIX || "/";
 const HEALTH_FILE = process.env.ZALO_HEALTH_FILE;
 const STABLE_AFTER_MS = 600_000;
-// Watchdog kết nối (watchdog.mjs): 0 = tắt. ZALO_WATCHDOG_OBSERVE=1 chỉ ghi khoảng lặng.
+// Watchdog kết nối (watchdog.mjs): mặc định 6 phút, "0" = tắt. ZALO_WATCHDOG_OBSERVE=1 chỉ ghi khoảng lặng.
 const WATCHDOG_OBSERVE = process.env.ZALO_WATCHDOG_OBSERVE === "1";
-const WATCHDOG_STALE_MS = WATCHDOG_OBSERVE ? Infinity : Number(process.env.ZALO_WATCHDOG_STALE_MS || 0);
+const WATCHDOG_STALE_MS = watchdogStaleMs();
 
 const accountStates = {};
 const accountProfiles = {}; // name -> {uid, displayName, avatar}: hiển thị trên giao diện
@@ -307,9 +307,10 @@ async function stopAccount(name) {
 const ONLY_ACCOUNT = onlyAccount();
 const manager = {
     list: () => {
-        const names = new Set([...discoverAccounts().map((a) => a.name), ...Object.keys(accountStates)]);
-        // Chế độ một tài khoản: tài khoản của pod luôn hiện, kể cả khi chưa đăng nhập.
-        if (ONLY_ACCOUNT) names.add(ONLY_ACCOUNT);
+        // Chế độ một tài khoản: chỉ tài khoản của container, luôn hiện kể cả khi chưa đăng nhập.
+        const names = ONLY_ACCOUNT
+            ? [ONLY_ACCOUNT]
+            : new Set([...discoverAccounts(ACCOUNTS_DIR, "").map((a) => a.name), ...Object.keys(accountStates)]);
         return [...names].sort().map((name) => ({
             name,
             state: accountStates[name] || "stopped",
@@ -330,7 +331,7 @@ const manager = {
     },
 };
 
-const accounts = discoverAccounts();
+const accounts = discoverAccounts(ACCOUNTS_DIR, ONLY_ACCOUNT);
 log("", "multi", `Chạy ${accounts.length} tài khoản: ${accounts.map((a) => a.name).join(", ") || "(chưa có)"}`);
 for (const signal of ["SIGINT", "SIGTERM"]) {
     process.on(signal, () => {
@@ -340,7 +341,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 if (gatewayEnabled()) {
     restoreRecent();
-    startSendServer(accountRoutes(manager));
+    startSendServer(accountRoutes(manager, { only: ONLY_ACCOUNT }));
 } else if (accounts.length === 0) {
     log("", "multi", "Chưa có tài khoản nào trong /data/accounts - chạy dịch vụ login trước.");
     process.exit(1);

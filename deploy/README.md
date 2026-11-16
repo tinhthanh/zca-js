@@ -20,6 +20,8 @@ deploy/
 ├── content.mjs                 # chuyển từng loại tin Zalo thành nội dung Libredesk (hàm thuần)
 ├── watchdog.mjs                # cắt socket im lặng quá ZALO_WATCHDOG_STALE_MS
 ├── history.mjs                 # lịch sử kết nối từng tài khoản (history.json)
+├── call.mjs                    # chuyển sự kiện gọi điện sang zalo-call (ZALO_CALL_EVENTS_URL)
+├── trace.mjs                   # ghi payload gốc của tài khoản thử (ZALO_TRACE)
 └── tests/deploy.test.mjs       # node:test
 ```
 
@@ -88,9 +90,11 @@ Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) c
 
 ## 🩺 Healthcheck và tài nguyên
 
+-   Image có sẵn `HEALTHCHECK` theo cách của chế độ gateway (dùng cho container từng tài khoản trên máy omi); compose có thể ghi đè, container chạy `login.mjs` tắt nó.
 -   Trạng thái từng tài khoản (`starting`, `running`, `retrying`, `dropped`) ghi vào `ZALO_HEALTH_FILE`; chạy riêng: container `healthy` khi mọi tài khoản là `running`; chế độ gateway: chưa có tài khoản vẫn `healthy`, không tài khoản nào `starting`/`retrying`/`dropped` là đạt. `ZALO_HEALTH_FILE` mặc định `/tmp/zalo-health.json`. Healthcheck dùng `grep` để không khởi động thêm tiến trình Node mỗi phút.
--   Tài khoản lỗi thử lại với backoff (30 giây, nhân đôi). Chỉ phiên hết hạn thật (Zalo từ chối credentials) mới dừng sau 2 lần; mất mạng thì thử lại mãi, tối đa mỗi 2 phút, có mạng lại là tự kết nối. Socket chết mà không báo đóng (mất mạng giữa chừng) được phát hiện bằng watchdog: không nhận frame nào trong `ZALO_WATCHDOG_STALE_MS` (mặc định 0 = tắt; compose của omnichannel đặt 360000 = 6 phút; Zalo trả ping ứng dụng khoảng 3 phút/lần; 0 = tắt) thì cắt và nối lại. `ZALO_WATCHDOG_OBSERVE=1` chỉ ghi khoảng lặng dài nhất mỗi 15 giây để đo trước khi đổi ngưỡng; khi mọi tài khoản bị bỏ, tiến trình vẫn chạy để không lặp lại đăng nhập hỏng.
--   `BOT_ACCOUNT=<tên>`: chế độ một tài khoản (omi, mỗi kênh một pod và một PVC). Bot chỉ chạy tài khoản này, `GET /accounts` chỉ hiện nó (kể cả khi chưa đăng nhập), mọi lệnh cho tài khoản khác trả 404. Trống: mọi tài khoản trong `ZALO_ACCOUNTS_DIR` như trước.
+-   Tài khoản lỗi thử lại với backoff (30 giây, nhân đôi). Chỉ phiên hết hạn thật (Zalo từ chối credentials) mới dừng sau 2 lần; mất mạng thì thử lại mãi, tối đa mỗi 2 phút, có mạng lại là tự kết nối. Socket chết mà không báo đóng (mất mạng giữa chừng) được phát hiện bằng watchdog: không nhận frame nào trong `ZALO_WATCHDOG_STALE_MS` (mặc định 360000 = 6 phút, Zalo trả ping ứng dụng khoảng 3 phút/lần; đặt `0` để tắt) thì cắt và nối lại. `ZALO_WATCHDOG_OBSERVE=1` chỉ ghi khoảng lặng dài nhất mỗi 15 giây để đo trước khi đổi ngưỡng; khi mọi tài khoản bị bỏ, tiến trình vẫn chạy để không lặp lại đăng nhập hỏng.
+-   `BOT_ACCOUNT=<tên>`: chế độ một tài khoản (omi, một container và một volume mỗi tài khoản, D28). Bot chỉ chạy tài khoản này, `GET /accounts` chỉ hiện nó (kể cả khi chưa đăng nhập), mọi lệnh cho tài khoản khác trả 404. Trống: mọi tài khoản trong `ZALO_ACCOUNTS_DIR` như trước.
+-   `ZALO_CALL_EVENTS_URL` (vd. `http://zalo-call:7009/call/event`): chuyển sự kiện gọi điện (voip) của các tài khoản được bật gọi điện trên trang Tài khoản kênh sang zalo-call. Trống: không chuyển, tài khoản khác không bao giờ rời bot.
 -   `ZALO_TRACE=shop1,acc2` ghi nguyên payload sự kiện (`message`, `old_messages`, `undo`, `reaction`, `group_event`, `friend_event`) của các tài khoản đó vào `<ZALO_ACCOUNTS_DIR>/../trace/<tài khoản>.jsonl` (quyền 0600, dừng ở 20 MiB) để đọc cấu trúc loại tin mới. File chứa nội dung tin: chỉ bật cho tài khoản thử, tắt và xoá file sau khi đọc.
 -   Đo lúc rảnh: 1 tài khoản ~27 MiB, mỗi tài khoản thêm ~8-10 MiB; trang login ~30 MiB. Image 172 MB.
 
