@@ -19,7 +19,7 @@ export const CALL_PATHS = new Set([
 const DIAL_PATHS = new Set(["requestcall", "request"]);
 
 /** Thời gian nhớ danh sách tài khoản được gọi điện lấy từ gateway. */
-export const CALL_ACCOUNTS_TTL_MS = 30_000;
+const CALL_ACCOUNTS_TTL_MS = 30_000;
 
 /**
  * Tài khoản được gọi điện: admin bật/tắt trên trang Tài khoản kênh, gateway lưu và trả qua

@@ -6,7 +6,7 @@ export const ACCOUNTS_DIR = process.env.ZALO_ACCOUNTS_DIR || "/data/accounts";
 export const ACCOUNT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 
 /**
- * Chế độ một tài khoản (omi, D27: mỗi kênh một pod): BOT_ACCOUNT là tên tài khoản duy nhất
+ * Chế độ một tài khoản (omi, D28: một container và một volume mỗi tài khoản): BOT_ACCOUNT là tên tài khoản duy nhất
  * bot chạy và nhận lệnh; tài khoản khác coi như không có. Trống: mọi tài khoản trong thư mục.
  */
 export function onlyAccount(value = process.env.BOT_ACCOUNT || "") {

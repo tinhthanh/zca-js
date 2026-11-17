@@ -34,7 +34,7 @@ import {
 } from "../accounts.mjs";
 import { CatchUp, isRecall, recallOf } from "../catchup.mjs";
 import { CALL_PATHS, createCallAccounts, ensureVoicecallApi, forwardVoip, validateSignal } from "../call.mjs";
-import { watchSocket } from "../watchdog.mjs";
+import { DEFAULT_WATCHDOG_STALE_MS, watchdogStaleMs, watchSocket } from "../watchdog.mjs";
 import { EventTrace, openTrace, removeTrace, traceAccounts } from "../trace.mjs";
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
@@ -980,7 +980,7 @@ test("accountRoutes: QR quét xong sau khi tài khoản đã gỡ thì không l�
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("BOT_ACCOUNT: chỉ tìm thấy đúng tài khoản của pod, tên sai thì không chạy", () => {
+test("BOT_ACCOUNT: chỉ tìm thấy đúng tài khoản của container, tên sai thì không chạy", () => {
     const dir = tempDir();
     for (const name of ["vetgo-uat.acc2", "vetgo-uat.shop1"]) {
         writePrivateJson(path.join(dir, name, "credentials.json"), credentials);
@@ -1031,4 +1031,14 @@ test("accountRoutes một tài khoản: tài khoản khác không đăng nhập,
     assert.equal((await call("POST", "/accounts/a.shop1/restart")).status, 404);
     assert.deepEqual(calls, []);
     fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("watchdogStaleMs: mặc định 6 phút, 0 thì tắt, OBSERVE chỉ đo", () => {
+    assert.equal(DEFAULT_WATCHDOG_STALE_MS, 360_000);
+    assert.equal(watchdogStaleMs({}), 360_000);
+    assert.equal(watchdogStaleMs({ ZALO_WATCHDOG_STALE_MS: "" }), 360_000);
+    assert.equal(watchdogStaleMs({ ZALO_WATCHDOG_STALE_MS: "0" }), 0);
+    assert.equal(watchdogStaleMs({ ZALO_WATCHDOG_STALE_MS: "90000" }), 90_000);
+    assert.equal(watchdogStaleMs({ ZALO_WATCHDOG_STALE_MS: "abc" }), 360_000);
+    assert.equal(watchdogStaleMs({ ZALO_WATCHDOG_STALE_MS: "0", ZALO_WATCHDOG_OBSERVE: "1" }), Infinity);
 });

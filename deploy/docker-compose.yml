@@ -32,6 +32,9 @@ services:
         image: zalo-bot
         command: ["node", "deploy/login.mjs"]
         restart: "no"
+        # Healthcheck của image dành cho bot.mjs; login.mjs không ghi file health.
+        healthcheck:
+            disable: true
         ports:
             # Chỉ bind localhost; trang QR không mở ra mạng ngoài.
             - "127.0.0.1:6081:6081"
