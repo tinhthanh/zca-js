@@ -201,11 +201,17 @@ export function summarize(message) {
     return text.length > 200 ? `${text.slice(0, 199)}…` : text;
 }
 
-/** "Tên: nội dung" của tin được trích dẫn, hoặc "" nếu không có quote. */
-export function quoteText(message) {
+/**
+ * "Tên: nội dung" của tin được trích dẫn, hoặc "" nếu không có quote.
+ * Zalo không gửi chữ của tin có tệp (ảnh, video...) trong quote: `remembered(quote)` trả
+ * tóm tắt bot đã nhớ của tin gốc (vd. "Chú thích 🎬 Video"), không có thì "[Tệp đính kèm]".
+ */
+export function quoteText(message, remembered = () => "") {
     const quote = message.data?.quote;
     if (!quote || typeof quote !== "object") return "";
-    const body = (typeof quote.msg === "string" && quote.msg.trim()) || (quote.attach ? "[Tệp đính kèm]" : "");
+    const body =
+        (typeof quote.msg === "string" && quote.msg.trim()) ||
+        (quote.attach ? remembered(quote) || "[Tệp đính kèm]" : "");
     if (!body) return "";
     return quote.fromD ? `${quote.fromD}: ${body}` : body;
 }

@@ -306,6 +306,12 @@ test("describeContent hiển thị link, danh thiếp, bình chọn, vị trí, 
 test("quoteText, reactionEmoji và groupEventText", () => {
     assert.equal(quoteText({ data: { quote: { msg: "giá?", fromD: "An" } } }), "An: giá?");
     assert.equal(quoteText({ data: { quote: { msg: "", attach: "{...}", fromD: "An" } } }), "An: [Tệp đính kèm]");
+    // Tin có tệp: dùng tóm tắt đã nhớ của tin gốc (theo globalMsgId).
+    const quoted = { data: { quote: { msg: "", attach: "{...}", fromD: "An", globalMsgId: 42 } } };
+    assert.equal(
+        quoteText(quoted, (q) => (q.globalMsgId === 42 ? "Chú thích 🎬 Video" : "")),
+        "An: Chú thích 🎬 Video",
+    );
     assert.equal(quoteText({ data: {} }), "");
     assert.equal(reactionEmoji("/-heart"), "❤️");
     assert.equal(reactionEmoji("/-unknown"), "/-unknown");
