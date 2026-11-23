@@ -405,7 +405,12 @@ export async function forwardMessage(account, api, message) {
             text,
             message_id: String(message.data?.msgId || ""),
             attachments,
-            quote: quoteText(message),
+            quote: quoteText(
+                message,
+                (q) =>
+                    (recent.get(`${account}:${q.globalMsgId}`) || recent.get(`${account}:${q.cliMsgId}`))?.summary ||
+                    "",
+            ),
         });
     } catch (error) {
         log(account, "gateway", `❌ Không chuyển được tin tới gateway: ${error.message}`);
