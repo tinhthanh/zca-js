@@ -185,6 +185,23 @@ test("downloadAttachment lấy file Zalo, dùng title làm tên file", async () 
     assert.equal((await downloadAttachment(photo, fakeFetch("J", { "content-type": "image/jpeg" }))).name, "img.jpg");
 });
 
+test("downloadAttachment tải lại khi CDN trả body rỗng (ảnh album chưa sẵn sàng)", async () => {
+    const photo = { data: { msgType: "chat.photo", content: { href: "https://cdn.zalo/p/album.jpg" } } };
+    const bodies = ["", "", Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2])];
+    let calls = 0;
+    const slept = [];
+    const fetchImpl = async () =>
+        new Response(bodies[calls++], { status: 200, headers: { "content-type": "image/jpeg" } });
+    const file = await downloadAttachment(photo, fetchImpl, { delays: [1, 2, 4], sleep: async (ms) => slept.push(ms) });
+    assert.equal(calls, 3);
+    assert.deepEqual(slept, [1, 2]);
+    assert.equal(file.content_type, "image/jpeg");
+    assert.equal(Buffer.from(file.data, "base64").length, 6);
+
+    // Vẫn rỗng sau mọi lần thử: báo lỗi để bot gửi mô tả thay vì tệp rỗng.
+    await assert.rejects(downloadAttachment(photo, fakeFetch(""), { delays: [1, 1], sleep: async () => {} }), /rỗng/);
+});
+
 test("downloadAttachment nhận loại file theo byte đầu (CDN Zalo ghi GIF là image/jpeg)", async () => {
     const gifBytes = Buffer.from("GIF89a....");
     const gif = { data: { msgType: "chat.gif", content: { href: "https://zgif-v2.zdn.vn/a.gif" } } };

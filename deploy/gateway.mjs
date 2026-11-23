@@ -167,15 +167,29 @@ function withExtension(name, contentType) {
     return `${clean}.${EXT_BY_TYPE[(contentType || "").split(";")[0]] || "bin"}`;
 }
 
-async function fetchFile(href, fetchImpl) {
-    const response = await fetchImpl(href, { signal: AbortSignal.timeout(60_000) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const declared = Number(response.headers.get("content-length") || 0);
-    if (declared > MAX_FILE_BYTES) throw new Error("file quá lớn");
-    const data = Buffer.from(await response.arrayBuffer());
-    if (data.length > MAX_FILE_BYTES) throw new Error("file quá lớn");
-    const declaredType = (response.headers.get("content-type") || "application/octet-stream").split(";")[0];
-    return { data, contentType: sniffType(data) || declaredType };
+// Ảnh trong album tới trước khi CDN có dữ liệu: CDN trả 200 với body rỗng vài giây đầu.
+export const EMPTY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
+
+async function fetchFile(
+    href,
+    fetchImpl,
+    { delays = EMPTY_RETRY_DELAYS_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {},
+) {
+    for (let attempt = 0; ; attempt++) {
+        const response = await fetchImpl(href, { signal: AbortSignal.timeout(60_000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const declared = Number(response.headers.get("content-length") || 0);
+        if (declared > MAX_FILE_BYTES) throw new Error("file quá lớn");
+        const data = Buffer.from(await response.arrayBuffer());
+        if (data.length > MAX_FILE_BYTES) throw new Error("file quá lớn");
+        if (data.length === 0) {
+            if (attempt >= delays.length) throw new Error("CDN trả file rỗng");
+            await sleep(delays[attempt]);
+            continue;
+        }
+        const declaredType = (response.headers.get("content-type") || "application/octet-stream").split(";")[0];
+        return { data, contentType: sniffType(data) || declaredType };
+    }
 }
 
 /** Loại file theo byte đầu: CDN của Zalo trả GIF và hình vẽ PNG với content-type image/jpeg. */
@@ -211,19 +225,12 @@ async function downloadSticker(api, message, fetchImpl = fetch) {
 }
 
 /** Tải file của một tin Zalo; null nếu không phải file hoặc tải lỗi/quá lớn. */
-export async function downloadAttachment(message, fetchImpl = fetch) {
+export async function downloadAttachment(message, fetchImpl = fetch, retry) {
     const kind = DOWNLOADABLE[message.data?.msgType];
     const content = message.data?.content;
     const href = content && typeof content === "object" ? content.href : "";
     if (!kind || typeof href !== "string" || !/^https:\/\//.test(href)) return null;
-    const response = await fetchImpl(href, { signal: AbortSignal.timeout(60_000) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const declared = Number(response.headers.get("content-length") || 0);
-    if (declared > MAX_FILE_BYTES) throw new Error("file quá lớn");
-    const data = Buffer.from(await response.arrayBuffer());
-    if (data.length > MAX_FILE_BYTES) throw new Error("file quá lớn");
-    const declaredType = (response.headers.get("content-type") || "application/octet-stream").split(";")[0];
-    const contentType = sniffType(data) || declaredType;
+    const { data, contentType } = await fetchFile(href, fetchImpl, retry);
     const urlName = decodeURIComponent(new URL(href).pathname.split("/").pop() || "");
     const original = kind === "file" && content.title ? content.title : urlName;
     const name = withExtension(kind === "file" ? original : matchExtension(original, contentType), contentType);
