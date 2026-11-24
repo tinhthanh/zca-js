@@ -39,6 +39,8 @@ import { EventTrace, openTrace, removeTrace, traceAccounts } from "../trace.mjs"
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
     acceptFriend,
+    mp4Info,
+    solidPng,
     captionOf,
     describeContent,
     downloadAttachment,
@@ -1080,4 +1082,44 @@ test("acceptFriend chấp nhận lời mời bằng phiên của bot, kiểm tra
         },
     };
     assert.equal((await acceptFriend(failing, "123456")).status, 502);
+});
+
+function mp4Box(kind, body) {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(8 + body.length, 0);
+    head.write(kind, 4, "latin1");
+    return Buffer.concat([head, body]);
+}
+
+test("mp4Info đọc thời lượng (mvhd) và kích thước video (tkhd), bỏ track âm thanh", () => {
+    const mvhd = Buffer.alloc(100);
+    mvhd.writeUInt32BE(1000, 12); // timescale
+    mvhd.writeUInt32BE(8500, 16); // 8,5 giây
+    const tkhd = (w, h) => {
+        const body = Buffer.alloc(84);
+        body.writeUInt32BE(w << 16, 76);
+        body.writeUInt32BE(h << 16, 80);
+        return mp4Box("tkhd", body);
+    };
+    const moov = mp4Box(
+        "moov",
+        Buffer.concat([mp4Box("mvhd", mvhd), mp4Box("trak", tkhd(0, 0)), mp4Box("trak", tkhd(720, 1280))]),
+    );
+    const file = Buffer.concat([mp4Box("ftyp", Buffer.from("isom0000")), moov]);
+    assert.deepEqual(mp4Info(file), { duration: 8500, width: 720, height: 1280 });
+    assert.deepEqual(mp4Info(Buffer.from("not an mp4 at all")), {});
+});
+
+test("solidPng tạo PNG hợp lệ đúng kích thước; splitVoices tách video mp4", () => {
+    const png = solidPng(320, 180, [32, 32, 32]);
+    assert.deepEqual(imageSize(png), { width: 320, height: 180 });
+    const b64 = (s) => Buffer.from(s).toString("base64");
+    const { voices, videos, files } = splitVoices([
+        { name: "a.m4a", content_type: "audio/mp4", data: b64("A") },
+        { name: "v.mp4", content_type: "video/mp4", data: b64("V") },
+        { name: "x.pdf", content_type: "application/pdf", data: b64("P") },
+        { name: "rong.mp4", content_type: "video/mp4", data: "" },
+    ]);
+    assert.deepEqual([voices.length, videos.length, files.length], [1, 1, 1]);
+    assert.equal(videos[0].filename, "v.mp4");
 });

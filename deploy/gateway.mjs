@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import zlib from "node:zlib";
 
 import { ThreadType, ZaloApiError } from "../dist/index.js";
 import { ACCOUNTS_DIR, log, writePrivateJson } from "./common.mjs";
@@ -608,17 +609,109 @@ export function toAttachmentSource(file) {
     return { data, filename: name, metadata };
 }
 
-/** Tách tệp audio (gửi thành tin thoại) khỏi tệp thường; bỏ tệp rỗng. */
+/** Tách audio (tin thoại) và video mp4 (tin video) khỏi tệp thường; bỏ tệp rỗng. */
 export function splitVoices(rawFiles) {
     const voices = [];
+    const videos = [];
     const files = [];
     for (const raw of rawFiles) {
         const source = toAttachmentSource(raw);
         if (!source) continue;
-        if (String(raw?.content_type || "").startsWith("audio/")) voices.push(source);
+        const type = String(raw?.content_type || "").split(";")[0];
+        if (type.startsWith("audio/")) voices.push(source);
+        else if (type === "video/mp4") videos.push(source);
         else files.push(source);
     }
-    return { voices, files };
+    return { voices, videos, files };
+}
+
+/** Thời lượng (ms) và kích thước khung của mp4 từ mvhd/tkhd; {} nếu không đọc được. */
+export function mp4Info(data) {
+    const info = {};
+    const walk = (start, end) => {
+        let pos = start;
+        while (pos + 8 <= end) {
+            let size = data.readUInt32BE(pos);
+            const box = data.toString("latin1", pos + 4, pos + 8);
+            let header = 8;
+            if (size === 1 && pos + 16 <= end) {
+                size = Number(data.readBigUInt64BE(pos + 8));
+                header = 16;
+            } else if (size === 0) size = end - pos;
+            if (size < header || pos + size > end) return;
+            const body = pos + header;
+            if (box === "moov" || box === "trak") walk(body, pos + size);
+            else if (box === "mvhd") {
+                const v1 = data[body] === 1;
+                const scale = data.readUInt32BE(body + (v1 ? 20 : 12));
+                const duration = v1 ? Number(data.readBigUInt64BE(body + 24)) : data.readUInt32BE(body + 16);
+                if (scale) info.duration = Math.round((duration * 1000) / scale);
+            } else if (box === "tkhd" && !info.width) {
+                // 16.16 fixed: rộng, cao nằm ở 8 byte cuối của tkhd (track âm thanh là 0).
+                const width = data.readUInt32BE(pos + size - 8) >>> 16;
+                const height = data.readUInt32BE(pos + size - 4) >>> 16;
+                if (width && height) Object.assign(info, { width, height });
+            }
+            pos += size;
+        }
+    };
+    try {
+        walk(0, data.length);
+    } catch {
+        return {};
+    }
+    return info;
+}
+
+/** PNG một màu (ảnh thu nhỏ của tin video khi bot không có khung hình nào). */
+export function solidPng(width, height, [r, g, b]) {
+    const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => [r, g, b]).flat())]);
+    const raw = Buffer.concat(Array.from({ length: height }, () => row));
+    const chunk = (kind, body) => {
+        const head = Buffer.alloc(8);
+        head.writeUInt32BE(body.length, 0);
+        head.write(kind, 4, "latin1");
+        const crc = Buffer.alloc(4);
+        crc.writeUInt32BE(zlib.crc32(Buffer.concat([Buffer.from(kind, "latin1"), body])) >>> 0, 0);
+        return Buffer.concat([head, body, crc]);
+    };
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(width, 0);
+    ihdr.writeUInt32BE(height, 4);
+    ihdr.set([8, 2, 0, 0, 0], 8);
+    return Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        chunk("IHDR", ihdr),
+        chunk("IDAT", zlib.deflateSync(raw)),
+        chunk("IEND", Buffer.alloc(0)),
+    ]);
+}
+
+/**
+ * Video mp4 của nhân viên: tải video và một ảnh thu nhỏ lên, rồi sendVideo để khách nhận tin video
+ * (phát ngay trong chat) thay vì tệp .mp4; lỗi thì gửi như tệp để khách vẫn nhận được.
+ */
+async function sendVideoOrFile(api, source, threadId, type, account) {
+    try {
+        const info = mp4Info(source.data);
+        const [video] = await api.uploadAttachment(source, threadId, type);
+        if (!video?.fileUrl) throw new Error("upload video không trả URL");
+        const thumbData = solidPng(320, 180, [32, 32, 32]);
+        const thumb = {
+            data: thumbData,
+            filename: "thumb.png",
+            metadata: { totalSize: thumbData.length, width: 320, height: 180 },
+        };
+        const [image] = await api.uploadAttachment(thumb, threadId, type);
+        const thumbnailUrl = image?.hdUrl || image?.normalUrl || image?.thumbUrl;
+        if (!thumbnailUrl) throw new Error("upload ảnh thu nhỏ không trả URL");
+        const result = await api.sendVideo({ videoUrl: video.fileUrl, thumbnailUrl, ...info }, threadId, type);
+        return result?.msgId;
+    } catch (error) {
+        log(account, "gateway", `Không gửi được tin video (${error?.message || error}), gửi dạng tệp.`);
+        const result = await api.sendMessage({ msg: "", attachments: [source] }, threadId, type);
+        return (result?.attachment || [])[0]?.msgId;
+    }
 }
 
 /** Tin thoại: tải lên lấy URL rồi sendVoice; lỗi thì gửi như tệp để khách vẫn nhận được. */
@@ -656,11 +749,15 @@ async function handleSend(req, res) {
     }
     const { account, thread_id: threadId, is_group: isGroup, message_id: messageId } = payload;
     const text = typeof payload.text === "string" ? payload.text : "";
-    // Audio thành tin thoại Zalo (sendVoice); tệp khác gửi kèm như cũ.
-    const { voices, files: attachments } = splitVoices(Array.isArray(payload.attachments) ? payload.attachments : []);
+    // Audio thành tin thoại Zalo (sendVoice), mp4 thành tin video (sendVideo); tệp khác gửi kèm như cũ.
+    const {
+        voices,
+        videos,
+        files: attachments,
+    } = splitVoices(Array.isArray(payload.attachments) ? payload.attachments : []);
     const api = apis.get(account);
     if (!api) return reply(res, 404, "unknown account");
-    if (!threadId || (!text.trim() && attachments.length === 0 && voices.length === 0)) {
+    if (!threadId || (!text.trim() && attachments.length === 0 && voices.length === 0 && videos.length === 0)) {
         return reply(res, 400, "invalid payload");
     }
     if (rememberReply(messageId)) return reply(res, 200, "duplicate");
@@ -668,7 +765,7 @@ async function handleSend(req, res) {
         account,
         threadId: String(threadId),
         text,
-        files: attachments.length + voices.length,
+        files: attachments.length + voices.length + videos.length,
         until: Date.now() + ECHO_WINDOW_MS,
     };
     pendingEchoes.push(echo);
@@ -681,6 +778,7 @@ async function handleSend(req, res) {
             ids.push(result?.message?.msgId, ...(result?.attachment || []).map((a) => a?.msgId));
         }
         for (const voice of voices) ids.push(await sendVoiceOrFile(api, voice, String(threadId), type, account));
+        for (const video of videos) ids.push(await sendVideoOrFile(api, video, String(threadId), type, account));
         ids.splice(0, ids.length, ...ids.filter(Boolean));
         botSent.remember(
             ids.map((id) => `${account}:${id}`),
@@ -689,7 +787,7 @@ async function handleSend(req, res) {
         log(
             account,
             "gateway",
-            `Đã gửi tin trả lời của nhân viên${attachments.length ? ` (${attachments.length} tệp)` : ""}${voices.length ? ` (${voices.length} tin thoại)` : ""}.`,
+            `Đã gửi tin trả lời của nhân viên${attachments.length ? ` (${attachments.length} tệp)` : ""}${voices.length ? ` (${voices.length} tin thoại)` : ""}${videos.length ? ` (${videos.length} video)` : ""}.`,
         );
         // Gateway giữ các id này để nhân viên thu hồi tin sau.
         res.writeHead(200, { "content-type": "application/json" });
