@@ -825,6 +825,32 @@ async function handleResolve(req, res) {
     }
 }
 
+/**
+ * Chấp nhận lời mời kết bạn bằng chính phiên của bot (không mở phiên Zalo thứ hai).
+ * Dùng khi hai tài khoản thử mất kết bạn: Zalo từ chối cuộc gọi giữa người lạ (status=7).
+ */
+export async function acceptFriend(api, userId) {
+    const id = String(userId || "").trim();
+    if (!/^\d{5,25}$/.test(id)) return { status: 400, message: "user_id phải là uid Zalo (chữ số)." };
+    try {
+        await api.acceptFriendRequest(id);
+        return { status: 200, message: "accepted" };
+    } catch (error) {
+        return { status: isPermanent(error) ? 422 : 502, message: `Zalo từ chối: ${error?.message || error}` };
+    }
+}
+
+async function handleAcceptFriend(req, res) {
+    if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
+    const payload = await readJSON(req, res);
+    if (!payload) return;
+    const api = apis.get(payload.account);
+    if (!api) return reply(res, 404, "unknown account");
+    const { status, message } = await acceptFriend(api, payload.user_id);
+    if (status === 200) log(payload.account, "gateway", `Đã chấp nhận lời mời kết bạn của ${payload.user_id}.`);
+    reply(res, status, message);
+}
+
 /** zalo-call gửi lệnh báo hiệu cuộc gọi qua phiên của bot (deploy/call.mjs). */
 async function handleCallSignalRequest(req, res) {
     if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
@@ -848,6 +874,8 @@ export function startSendServer(extra = null) {
             handleReact(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/recall") {
             handleRecall(req, res).catch(() => reply(res, 500, "error"));
+        } else if (req.method === "POST" && req.url === "/friend/accept") {
+            handleAcceptFriend(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/call/signal") {
             handleCallSignalRequest(req, res).catch(() => reply(res, 500, "error"));
         } else if (extra && req.headers.authorization === `Bearer ${GATEWAY_TOKEN}`) {
