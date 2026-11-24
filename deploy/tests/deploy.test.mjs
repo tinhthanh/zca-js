@@ -38,6 +38,7 @@ import { DEFAULT_WATCHDOG_STALE_MS, watchdogStaleMs, watchSocket } from "../watc
 import { EventTrace, openTrace, removeTrace, traceAccounts } from "../trace.mjs";
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
+    acceptFriend,
     captionOf,
     describeContent,
     downloadAttachment,
@@ -1064,4 +1065,19 @@ test("watchdogStaleMs: mặc định 6 phút, 0 thì tắt, OBSERVE chỉ đo", 
     assert.equal(watchdogStaleMs({ ZALO_WATCHDOG_STALE_MS: "90000" }), 90_000);
     assert.equal(watchdogStaleMs({ ZALO_WATCHDOG_STALE_MS: "abc" }), 360_000);
     assert.equal(watchdogStaleMs({ ZALO_WATCHDOG_STALE_MS: "0", ZALO_WATCHDOG_OBSERVE: "1" }), Infinity);
+});
+
+test("acceptFriend chấp nhận lời mời bằng phiên của bot, kiểm tra uid", async () => {
+    const calls = [];
+    const api = { acceptFriendRequest: async (id) => calls.push(id) };
+    assert.deepEqual(await acceptFriend(api, " 6189264738021234567 "), { status: 200, message: "accepted" });
+    assert.deepEqual(calls, ["6189264738021234567"]);
+    assert.equal((await acceptFriend(api, "abc")).status, 400);
+    assert.equal((await acceptFriend(api, "")).status, 400);
+    const failing = {
+        acceptFriendRequest: async () => {
+            throw new Error("network down");
+        },
+    };
+    assert.equal((await acceptFriend(failing, "123456")).status, 502);
 });
