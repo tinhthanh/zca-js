@@ -45,7 +45,7 @@ docker compose restart bot
 ### Trích dẫn và thu hồi tin nhân viên
 
 - `POST /send` nhận thêm `reply_to` (msgId tin khách): bot nhớ dữ liệu 2048 tin khách gần nhất để gửi trích dẫn thật (`sendMessage({msg, quote})`, chỉ tin chữ). Trả về `{"ok": true, "message_ids": [...]}`.
-- Tệp `audio/*` trong `attachments` được gửi thành **tin thoại** Zalo (`uploadAttachment` lấy URL rồi `sendVoice`); gửi thoại lỗi thì gửi lại dạng tệp để khách vẫn nhận được. Tệp khác và chữ đi qua `sendMessage` như cũ.
+- Tệp `audio/*` trong `attachments` được gửi thành **tin thoại** Zalo (`uploadAttachment` lấy URL rồi `sendVoice`); gửi thoại lỗi thì gửi lại dạng tệp để khách vẫn nhận được. Tệp `video/mp4` được gửi thành **tin video** (phát ngay trong chat): tải video và một ảnh thu nhỏ một màu lên (`uploadAttachment`), rồi `sendVideo` kèm thời lượng và kích thước đọc từ `mvhd`/`tkhd`; lỗi thì gửi dạng tệp. Tệp khác và chữ đi qua `sendMessage` như cũ.
 - `POST /react {account, thread_id, is_group, message_id, emoji}`: nhân viên thả cảm xúc lên tin khách bằng `api.addReaction` (❤️ 👍 😆 😮 😢 😡; `emoji` rỗng là bỏ). Cần `msgId` và `cliMsgId` của tin gốc, lấy từ bộ nhớ tin (lưu xuống đĩa nên còn sau khi khởi động lại); không còn nhớ thì trả 409.
 - `POST /recall {account, thread_id, is_group, message_ids}`: `api.undo` cần cả `cliMsgId`, lấy từ tin bot tự nghe lại (selfListen); chưa nghe lại thì trả 409. Sự kiện `undo` của chính tin đó không ghi chú lặp (gateway đã ghi).
 
@@ -115,6 +115,6 @@ git fetch upstream && git merge upstream/main
 cd deploy && docker compose build && docker compose up -d
 ```
 
-Fork chỉ thêm `deploy/`, nên merge không conflict. Các API upstream mà deploy dùng (soát khi merge upstream): `Zalo` (`login`, `loginQR`), `LoginQRCallbackEventType` (import từ `dist/apis/loginQR.js`), `ThreadType`, `api.listener` (sự kiện `connected`, `disconnected`, `closed`, `error`, `message`, `undo`, `reaction`, `typing`, `seen_messages`, `group_event`, `friend_event`, `old_messages`, `cipher_key`; `requestOldMessages`), `api.sendMessage`, `api.sendVoice`, `api.uploadAttachment`, `api.addReaction`, `api.undo`, `api.findUser`, `api.getUserInfo`, `api.getGroupInfo`, `api.getStickersDetail`, `api.fetchAccountInfo`, `api.getOwnId`, `api.getContext`.
+Fork chỉ thêm `deploy/`, nên merge không conflict. Các API upstream mà deploy dùng (soát khi merge upstream): `Zalo` (`login`, `loginQR`), `LoginQRCallbackEventType` (import từ `dist/apis/loginQR.js`), `ThreadType`, `api.listener` (sự kiện `connected`, `disconnected`, `closed`, `error`, `message`, `undo`, `reaction`, `typing`, `seen_messages`, `group_event`, `friend_event`, `old_messages`, `cipher_key`; `requestOldMessages`), `api.sendMessage`, `api.sendVoice`, `api.sendVideo`, `api.acceptFriendRequest`, `api.uploadAttachment`, `api.addReaction`, `api.undo`, `api.findUser`, `api.getUserInfo`, `api.getGroupInfo`, `api.getStickersDetail`, `api.fetchAccountInfo`, `api.getOwnId`, `api.getContext`.
 
 Biến môi trường khác: `LOGIN_PORT` (6081), `ZALO_ACCOUNTS_DIR` (`/data/accounts`), `BOT_PREFIX` (`/`), `BOT_CPUS`/`BOT_MEMORY_LIMIT` (compose chạy riêng).
