@@ -315,6 +315,13 @@ test("quoteText, reactionEmoji và groupEventText", () => {
         quoteText(quoted, (q) => (q.globalMsgId === 42 ? "Chú thích 🎬 Video" : "")),
         "An: Chú thích 🎬 Video",
     );
+    // Trích dẫn 1-1 từ Zalo Web/zca-js: không có attach, vẫn tra tin gốc theo id.
+    const bare = { data: { quote: { msg: "", attach: "", fromD: "An", globalMsgId: 7 } } };
+    assert.equal(
+        quoteText(bare, (q) => (q.globalMsgId === 7 ? "🖼️ Ảnh" : "")),
+        "An: 🖼️ Ảnh",
+    );
+    assert.equal(quoteText(bare), "");
     assert.equal(quoteText({ data: {} }), "");
     assert.equal(reactionEmoji("/-heart"), "❤️");
     assert.equal(reactionEmoji("/-unknown"), "/-unknown");
