@@ -76,7 +76,7 @@ Khi bật gateway, server HTTP của bot (cùng `GATEWAY_TOKEN` với `/send`) c
 `content.mjs` (hàm thuần) chuyển từng loại tin thành dạng Libredesk hiển thị được, dựa trên payload thật ghi lại từ Zalo:
 
 -   Sticker: tra ảnh qua `getStickersDetail` rồi gửi như ảnh đính kèm; doodle tải qua `href`.
--   Link (`chat.recommended`/`recommened.link`), danh thiếp (`recommened.user`), bình chọn (`group.poll`), vị trí (`chat.location.new`), việc cần làm (`chat.todo`): chữ có biểu tượng.
+-   Link (`chat.recommended`/`recommened.link`), danh thiếp (`recommened.user`), bình chọn (`group.poll`), vị trí (`chat.location.new`), việc cần làm (`chat.todo`): chữ có biểu tượng. Bình chọn tra thêm `getPollDetail`: tạo thì kèm các phương án, bỏ phiếu thì kèm phương án người đó chọn và số phiếu hiện tại (lỗi tra cứu thì chỉ còn câu hỏi).
 -   Trích dẫn (`data.quote`): gửi kèm trường `quote` = `Tên: nội dung`.
 -   Video (`chat.video.msg`): tải file mp4 kèm dòng `🎬 Video · m:ss` (thời lượng trong `params`); chú thích (`title`) giữ lại. Giao diện Libredesk đã vá (`omnichannel/libredesk-ui`) phát video ngay trong khung chat.
 -   Avatar: `thread_avatar` là `fullAvt`/`avt` của nhóm (`getGroupInfo`) hoặc `avatar` của người (`getUserInfo`), nhớ 6 giờ; tin nhóm gửi thêm `sender_avatar` của người gửi.

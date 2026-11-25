@@ -14,6 +14,8 @@ import {
     friendEventInfo,
     groupEventText,
     groupSettingChanges,
+    pollDetailText,
+    pollIdOf,
     quoteText,
     reactionEmoji,
     reactionText,
@@ -264,6 +266,27 @@ test("describeContent hiển thị link, danh thiếp, bình chọn, vị trí, 
         },
     };
     assert.equal(describeContent(poll), "📊 Bình tạo bình chọn: Ăn gì?");
+    const vote = {
+        data: {
+            msgType: "group.poll",
+            content: { action: "vote", params: '{"question":"Ăn gì?","dName":"Bình","pollId":42}' },
+        },
+    };
+    assert.equal(describeContent(vote), "📊 Bình bỏ phiếu: Ăn gì?");
+    assert.equal(pollIdOf(vote), 42);
+    assert.equal(pollIdOf(poll), null);
+    assert.equal(pollIdOf({ data: { msgType: "webchat", content: "x" } }), null);
+    const detail = {
+        options: [
+            { content: "Phở", votes: 2, voters: ["7", "9"] },
+            { content: "Bún", votes: 0, voters: [] },
+        ],
+    };
+    assert.equal(pollDetailText(detail, "create", "7"), "• Phở\n• Bún");
+    assert.equal(pollDetailText(detail, "vote", 7), "Chọn: Phở\nKết quả: Phở (2) · Bún (0)");
+    // Ẩn người bỏ phiếu: không biết ai chọn gì, vẫn có kết quả.
+    assert.equal(pollDetailText(detail, "vote", "8"), "Kết quả: Phở (2) · Bún (0)");
+    assert.equal(pollDetailText({}, "create", "7"), "");
     const place = {
         data: {
             msgType: "chat.location.new",

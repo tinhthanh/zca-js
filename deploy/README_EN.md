@@ -76,7 +76,7 @@ A successful sign-in writes `credentials.json` (0600) and starts the account rig
 `content.mjs` (pure functions) turns each message type into something Libredesk can show, based on real payloads captured from Zalo:
 
 -   Stickers: the image is looked up through `getStickersDetail` and sent as an image attachment; doodles are downloaded from `href`.
--   Links (`chat.recommended`/`recommened.link`), contact cards (`recommened.user`), polls (`group.poll`), locations (`chat.location.new`) and to-dos (`chat.todo`): text with an icon.
+-   Links (`chat.recommended`/`recommened.link`), contact cards (`recommened.user`), polls (`group.poll`), locations (`chat.location.new`) and to-dos (`chat.todo`): text with an icon. Polls also look up `getPollDetail`: a new poll lists its options, a vote shows what the voter chose and the current counts (only the question if the lookup fails).
 -   Quotes (`data.quote`): sent as the `quote` field, `Name: text`.
 -   Videos (`chat.video.msg`): the mp4 is attached with a `🎬 Video · m:ss` line (duration from `params`); the caption (`title`) is kept. The patched Libredesk UI (`omnichannel/libredesk-ui`) plays videos inline.
 -   Avatars: `thread_avatar` is the group's `fullAvt`/`avt` (`getGroupInfo`) or the person's `avatar` (`getUserInfo`), cached for 6 hours; group messages also send the sender's `sender_avatar`.
