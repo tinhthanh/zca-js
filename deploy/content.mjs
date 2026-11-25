@@ -73,6 +73,34 @@ function callText(action, params) {
 }
 
 /** Chữ hiển thị cho một tin Zalo (không gồm phần file tải về). */
+// Hành động của tin group.poll (thử thật 25/11/2026: tạo rồi bỏ phiếu từ app Zalo).
+const POLL_VERBS = { create: "tạo bình chọn", vote: "bỏ phiếu" };
+
+/** Id bình chọn của tin group.poll; null nếu không phải bình chọn hoặc thiếu id. */
+export function pollIdOf(message) {
+    const data = message.data || {};
+    if (data.msgType !== "group.poll") return null;
+    const c = data.content && typeof data.content === "object" ? data.content : {};
+    const params = parseJson(c.params) || {};
+    const id = Number(params.pollId ?? params.poll_id ?? c.pollId);
+    return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+/**
+ * Các dòng thêm từ getPollDetail: phương án (tạo) hoặc phương án người bỏ phiếu chọn và
+ * số phiếu hiện tại (bỏ phiếu). Tin group.poll chỉ có câu hỏi, không có phương án.
+ */
+export function pollDetailText(detail, action, voterId) {
+    const options = Array.isArray(detail?.options) ? detail.options.filter((o) => o && o.content) : [];
+    if (!options.length) return "";
+    if (action === "create") return options.map((o) => `• ${o.content}`).join("\n");
+    const chosen = options.filter((o) => Array.isArray(o.voters) && o.voters.map(String).includes(String(voterId)));
+    return joinLines(
+        chosen.length ? `Chọn: ${chosen.map((o) => o.content).join(", ")}` : "",
+        `Kết quả: ${options.map((o) => `${o.content} (${Number(o.votes) || 0})`).join(" · ")}`,
+    );
+}
+
 export function describeContent(message) {
     const data = message.data || {};
     const content = data.content;
@@ -99,7 +127,7 @@ export function describeContent(message) {
             return joinLines(`🔗 ${c.title || c.href || "Liên kết"}`, c.href, c.description);
         case "group.poll": {
             const question = params.question || c.title || "";
-            const verb = c.action === "create" ? "tạo bình chọn" : `bình chọn (${c.action || "cập nhật"})`;
+            const verb = POLL_VERBS[c.action] || "cập nhật bình chọn";
             return `📊 ${params.dName || data.dName || "Thành viên"} ${verb}: ${question}`;
         }
         case "chat.location.new": {

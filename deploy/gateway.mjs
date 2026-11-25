@@ -16,6 +16,8 @@ import {
     isRedundantNotice,
     friendEventInfo,
     groupEventText,
+    pollDetailText,
+    pollIdOf,
     quoteText,
     reactionEmoji,
     reactionIcon,
@@ -259,8 +261,26 @@ export function videoText(message) {
     return [captionOf(message), `🎬 Video${length}`].filter(Boolean).join("\n");
 }
 
+/** Bình chọn: thêm phương án hoặc lựa chọn của người bỏ phiếu; lỗi tra cứu thì giữ câu hỏi. */
+async function pollText(account, api, message, text) {
+    const id = pollIdOf(message);
+    if (!id || typeof api?.getPollDetail !== "function") return text;
+    try {
+        const detail = await api.getPollDetail(id);
+        const action = message.data?.content?.action;
+        return joinText(text, pollDetailText(detail, action, message.data?.uidFrom));
+    } catch (error) {
+        log(account, "gateway", `Không tra được bình chọn ${id}: ${error.message}`);
+        return text;
+    }
+}
+
+function joinText(...parts) {
+    return parts.filter((p) => typeof p === "string" && p.trim()).join("\n");
+}
+
 async function collect(account, api, message) {
-    let text = describeContent(message);
+    let text = await pollText(account, api, message, describeContent(message));
     const attachments = [];
     try {
         const file = (await downloadAttachment(message)) || (await downloadSticker(api, message));
