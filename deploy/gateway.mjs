@@ -980,6 +980,128 @@ async function handleAcceptFriend(req, res) {
     reply(res, status, message);
 }
 
+/** Che số điện thoại trong log: 3 số đầu + **** + 3 số cuối. */
+function maskPhone(phone) {
+    const s = String(phone || "");
+    return s.length > 6 ? `${s.slice(0, 3)}****${s.slice(-3)}` : "****";
+}
+
+/** Lỗi Zalo thô cho omi: 502 kèm mã gốc (null nếu là lỗi mạng). */
+function zaloFailure(error, extra = {}) {
+    const code = error instanceof ZaloApiError && error.code != null ? error.code : null;
+    return { status: 502, body: { ...extra, code, error: String(error?.message || error) } };
+}
+
+/**
+ * Kết bạn với khách theo số điện thoại (omi outreach). Trả {status, body}:
+ * friend/sent (200, kèm uid, global_id, name, avatar), invalid_phone (422),
+ * not_found (404), blocked (403), error (502, giữ mã Zalo thô).
+ */
+export async function requestFriend(api, payload) {
+    // Tự đổi về "84..." để findUser không phụ thuộc ngôn ngữ của phiên.
+    const phone = normalizePhone(payload?.phone);
+    if (!phone) return { status: 422, body: { status: "invalid_phone", error: "Số điện thoại không hợp lệ." } };
+    const message = typeof payload?.message === "string" ? payload.message : "";
+    let user;
+    try {
+        user = await api.findUser(phone);
+    } catch (error) {
+        if (error instanceof ZaloApiError && error.code === 219) {
+            return { status: 422, body: { status: "invalid_phone", code: 219, error: "Số điện thoại không hợp lệ." } };
+        }
+        return zaloFailure(error, { status: "error" });
+    }
+    // zca-js nuốt mã 216 (số không có Zalo) và trả dữ liệu rỗng.
+    if (!user?.uid) {
+        return { status: 404, body: { status: "not_found", error: "Không tìm thấy tài khoản Zalo với số này." } };
+    }
+    const uid = String(user.uid);
+    const info = {
+        uid,
+        global_id: user.globalId ? String(user.globalId) : "",
+        name: user.display_name || user.zalo_name || "",
+        avatar: user.avatar || "",
+    };
+    const ok = (status) => ({ status: 200, body: { status, ...info } });
+    try {
+        const state = await api.getFriendRequestStatus(uid);
+        if (state?.is_friend) return ok("friend");
+        if (state?.is_requested) return ok("sent");
+        if (state?.is_requesting) {
+            await api.acceptFriendRequest(uid);
+            return ok("friend");
+        }
+        await api.sendFriendRequest(message, uid);
+        return ok("sent");
+    } catch (error) {
+        const code = error instanceof ZaloApiError ? error.code : null;
+        // 225: đã là bạn; 222: khách đã mời mình, Zalo coi lời mời là chấp nhận.
+        if (code === 225 || code === 222) return ok("friend");
+        if (code === 215) {
+            return { status: 403, body: { status: "blocked", code: 215, error: "Khách đã chặn tài khoản Zalo này." } };
+        }
+        return zaloFailure(error, { status: "error" });
+    }
+}
+
+/** Nhắc hẹn 1-1 với khách (createReminder). Trả {status, body}: 200 {reminder_id}, 400, 502 {code, error}. */
+export async function createUserReminder(api, payload) {
+    const threadId = String(payload?.thread_id || "").trim();
+    if (!/^\d{5,25}$/.test(threadId)) return { status: 400, body: { error: "thread_id phải là uid Zalo (chữ số)." } };
+    const title = typeof payload?.title === "string" ? payload.title.trim() : "";
+    if (!title) return { status: 400, body: { error: "Thiếu nội dung nhắc hẹn." } };
+    const startTime = payload?.start_time;
+    if (!Number.isSafeInteger(startTime) || startTime <= 0) {
+        return { status: 400, body: { error: "start_time phải là thời điểm (ms epoch)." } };
+    }
+    const options = { title, startTime };
+    if (typeof payload.emoji === "string" && payload.emoji) options.emoji = payload.emoji;
+    try {
+        const result = await api.createReminder(options, threadId, ThreadType.User);
+        const id = result?.reminderId;
+        if (id == null || id === "") return { status: 502, body: { code: null, error: "Zalo không trả mã nhắc hẹn." } };
+        return { status: 200, body: { reminder_id: String(id) } };
+    } catch (error) {
+        return zaloFailure(error);
+    }
+}
+
+function replyJSON(res, status, body) {
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+}
+
+const UNKNOWN_ACCOUNT = "Tài khoản Zalo này không chạy trên bot.";
+
+async function handleFriendRequest(req, res) {
+    if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
+    const payload = await readJSON(req, res);
+    if (!payload) return;
+    const api = apis.get(payload.account);
+    if (!api) return replyJSON(res, 404, { status: "error", code: null, error: UNKNOWN_ACCOUNT });
+    const { status, body } = await requestFriend(api, payload);
+    const phone = maskPhone(normalizePhone(payload.phone));
+    const code = body.code != null ? ` (mã ${body.code})` : "";
+    log(payload.account, "gateway", `Kết bạn ${phone}: ${body.status}${code}.`);
+    replyJSON(res, status, body);
+}
+
+async function handleReminder(req, res) {
+    if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
+    const payload = await readJSON(req, res);
+    if (!payload) return;
+    const api = apis.get(payload.account);
+    if (!api) return replyJSON(res, 404, { code: null, error: UNKNOWN_ACCOUNT });
+    const { status, body } = await createUserReminder(api, payload);
+    const code = body.code != null ? `, mã ${body.code}` : "";
+    log(
+        payload.account,
+        "gateway",
+        status === 200 ? "Đã tạo nhắc hẹn." : `❌ Tạo nhắc hẹn thất bại (${status}${code}).`,
+    );
+    replyJSON(res, status, body);
+}
+
 /** zalo-call gửi lệnh báo hiệu cuộc gọi qua phiên của bot (deploy/call.mjs). */
 async function handleCallSignalRequest(req, res) {
     if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
@@ -1005,6 +1127,10 @@ export function startSendServer(extra = null) {
             handleRecall(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/friend/accept") {
             handleAcceptFriend(req, res).catch(() => reply(res, 500, "error"));
+        } else if (req.method === "POST" && req.url === "/friend/request") {
+            handleFriendRequest(req, res).catch(() => reply(res, 500, "error"));
+        } else if (req.method === "POST" && req.url === "/reminder") {
+            handleReminder(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/call/signal") {
             handleCallSignalRequest(req, res).catch(() => reply(res, 500, "error"));
         } else if (extra && req.headers.authorization === `Bearer ${GATEWAY_TOKEN}`) {

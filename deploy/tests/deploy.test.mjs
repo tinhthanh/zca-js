@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { LoginQRCallbackEventType } from "../../dist/apis/loginQR.js";
-import { FriendEventType, ThreadType } from "../../dist/index.js";
+import { FriendEventType, ThreadType, ZaloApiError } from "../../dist/index.js";
 
 import { discoverAccounts, isValidCredentials, onlyAccount, readCredentials, writePrivateJson } from "../common.mjs";
 import {
@@ -43,6 +43,8 @@ import { EventTrace, openTrace, removeTrace, traceAccounts } from "../trace.mjs"
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
     acceptFriend,
+    createUserReminder,
+    requestFriend,
     mp4Info,
     solidPng,
     captionOf,
@@ -1180,4 +1182,170 @@ test("solidPng tạo PNG hợp lệ đúng kích thước; splitVoices tách vid
     ]);
     assert.deepEqual([voices.length, videos.length, files.length], [1, 1, 1]);
     assert.equal(videos[0].filename, "v.mp4");
+});
+
+/** api giả cho /friend/request: mỗi hàm là kết quả hoặc lỗi cần ném. */
+function fakeFriendApi({ user, state, find, send, accept } = {}) {
+    const calls = [];
+    const run = (value) => {
+        if (value instanceof Error) throw value;
+        return value;
+    };
+    return {
+        calls,
+        findUser: async (phone) => {
+            calls.push(["findUser", phone]);
+            return find ? run(find) : user;
+        },
+        getFriendRequestStatus: async (uid) => {
+            calls.push(["status", uid]);
+            return run(state ?? { is_friend: 0, is_requested: 0, is_requesting: 0 });
+        },
+        acceptFriendRequest: async (uid) => {
+            calls.push(["accept", uid]);
+            return run(accept ?? "");
+        },
+        sendFriendRequest: async (msg, uid) => {
+            calls.push(["send", msg, uid]);
+            return run(send ?? "");
+        },
+    };
+}
+
+const zaloUser = {
+    uid: "111222333",
+    globalId: "G123",
+    display_name: "Khách A",
+    zalo_name: "A",
+    avatar: "https://a/x.jpg",
+};
+const zaloInfo = { uid: "111222333", global_id: "G123", name: "Khách A", avatar: "https://a/x.jpg" };
+
+test("requestFriend: số sai dạng hoặc mã 219 là invalid_phone (422)", async () => {
+    const api = fakeFriendApi({ user: zaloUser });
+    assert.deepEqual((await requestFriend(api, { phone: "abc" })).status, 422);
+    assert.equal(api.calls.length, 0); // không gọi Zalo khi số sai dạng
+    const bad = fakeFriendApi({ find: new ZaloApiError("Số điện thoại không hợp lệ", 219) });
+    assert.deepEqual(await requestFriend(bad, { phone: "0901234567" }), {
+        status: 422,
+        body: { status: "invalid_phone", code: 219, error: "Số điện thoại không hợp lệ." },
+    });
+});
+
+test("requestFriend: tự đổi số về 84... trước findUser, không phụ thuộc ngôn ngữ phiên", async () => {
+    const api = fakeFriendApi({ user: zaloUser, state: { is_friend: 1 } });
+    await requestFriend(api, { phone: "0901 234.567" });
+    assert.deepEqual(api.calls[0], ["findUser", "84901234567"]);
+});
+
+test("requestFriend: không có uid (zca-js nuốt mã 216) là not_found (404)", async () => {
+    for (const user of [undefined, null, {}, { uid: "" }]) {
+        const res = await requestFriend(fakeFriendApi({ user }), { phone: "0901234567" });
+        assert.equal(res.status, 404);
+        assert.equal(res.body.status, "not_found");
+    }
+});
+
+test("requestFriend: lỗi khác của findUser là 502 giữ mã thô; lỗi mạng mã null", async () => {
+    const res = await requestFriend(fakeFriendApi({ find: new ZaloApiError("quá giới hạn", 221) }), {
+        phone: "0901234567",
+    });
+    assert.deepEqual(res, { status: 502, body: { status: "error", code: 221, error: "quá giới hạn" } });
+    const net = await requestFriend(fakeFriendApi({ find: new Error("fetch failed") }), { phone: "0901234567" });
+    assert.deepEqual(net, { status: 502, body: { status: "error", code: null, error: "fetch failed" } });
+});
+
+test("requestFriend: theo getFriendRequestStatus (bạn, đã mời, khách mời mình)", async () => {
+    const friend = fakeFriendApi({ user: zaloUser, state: { is_friend: 1, is_requested: 0, is_requesting: 0 } });
+    assert.deepEqual(await requestFriend(friend, { phone: "0901234567" }), {
+        status: 200,
+        body: { status: "friend", ...zaloInfo },
+    });
+    assert.ok(!friend.calls.some(([name]) => name === "send"));
+
+    const requested = fakeFriendApi({ user: zaloUser, state: { is_friend: 0, is_requested: 1, is_requesting: 0 } });
+    assert.deepEqual((await requestFriend(requested, { phone: "0901234567" })).body.status, "sent");
+    assert.ok(!requested.calls.some(([name]) => name === "send"));
+
+    const requesting = fakeFriendApi({ user: zaloUser, state: { is_friend: 0, is_requested: 0, is_requesting: 1 } });
+    const res = await requestFriend(requesting, { phone: "0901234567" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, "friend");
+    assert.deepEqual(requesting.calls.at(-1), ["accept", "111222333"]);
+
+    const acceptFails = fakeFriendApi({
+        user: zaloUser,
+        state: { is_requesting: 1 },
+        accept: new ZaloApiError("lỗi", 500),
+    });
+    assert.deepEqual((await requestFriend(acceptFails, { phone: "0901234567" })).body.code, 500);
+});
+
+test("requestFriend: gửi lời mời và ánh xạ mã 225, 222, 215, mã khác", async () => {
+    const api = fakeFriendApi({ user: zaloUser });
+    assert.deepEqual(await requestFriend(api, { phone: "+84901234567", message: "Chào bạn" }), {
+        status: 200,
+        body: { status: "sent", ...zaloInfo },
+    });
+    assert.deepEqual(api.calls.at(-1), ["send", "Chào bạn", "111222333"]);
+
+    for (const code of [225, 222]) {
+        const res = await requestFriend(fakeFriendApi({ user: zaloUser, send: new ZaloApiError("x", code) }), {
+            phone: "0901234567",
+        });
+        assert.deepEqual(res, { status: 200, body: { status: "friend", ...zaloInfo } });
+    }
+    const blocked = await requestFriend(fakeFriendApi({ user: zaloUser, send: new ZaloApiError("chặn", 215) }), {
+        phone: "0901234567",
+    });
+    assert.equal(blocked.status, 403);
+    assert.equal(blocked.body.status, "blocked");
+    assert.equal(blocked.body.code, 215);
+
+    const other = await requestFriend(fakeFriendApi({ user: zaloUser, send: new ZaloApiError("lạ", 223) }), {
+        phone: "0901234567",
+    });
+    assert.deepEqual(other, { status: 502, body: { status: "error", code: 223, error: "lạ" } });
+    const net = await requestFriend(fakeFriendApi({ user: zaloUser, state: new Error("timeout") }), {
+        phone: "0901234567",
+    });
+    assert.deepEqual(net, { status: 502, body: { status: "error", code: null, error: "timeout" } });
+});
+
+test("createUserReminder: nhắc hẹn 1-1, kiểm tra đầu vào, giữ mã lỗi Zalo", async () => {
+    const calls = [];
+    const api = {
+        createReminder: async (options, threadId, type) => {
+            calls.push([options, threadId, type]);
+            return { reminderId: "R1", toUid: threadId };
+        },
+    };
+    const payload = { thread_id: "111222333", title: "Lịch tái khám", start_time: 1_764_000_000_000 };
+    assert.deepEqual(await createUserReminder(api, payload), { status: 200, body: { reminder_id: "R1" } });
+    assert.deepEqual(calls[0], [
+        { title: "Lịch tái khám", startTime: 1_764_000_000_000 },
+        "111222333",
+        ThreadType.User,
+    ]);
+    await createUserReminder(api, { ...payload, emoji: "🐶" });
+    assert.equal(calls[1][0].emoji, "🐶");
+
+    assert.equal((await createUserReminder(api, { ...payload, thread_id: "abc" })).status, 400);
+    assert.equal((await createUserReminder(api, { ...payload, title: " " })).status, 400);
+    assert.equal((await createUserReminder(api, { ...payload, start_time: "1764000000000" })).status, 400);
+    assert.equal((await createUserReminder(api, { ...payload, start_time: 0 })).status, 400);
+    assert.equal(calls.length, 2);
+
+    const failing = { createReminder: async () => Promise.reject(new ZaloApiError("không được", 114)) };
+    assert.deepEqual(await createUserReminder(failing, payload), {
+        status: 502,
+        body: { code: 114, error: "không được" },
+    });
+    const net = { createReminder: async () => Promise.reject(new Error("fetch failed")) };
+    assert.deepEqual(await createUserReminder(net, payload), {
+        status: 502,
+        body: { code: null, error: "fetch failed" },
+    });
+    const empty = { createReminder: async () => ({}) };
+    assert.equal((await createUserReminder(empty, payload)).status, 502);
 });
