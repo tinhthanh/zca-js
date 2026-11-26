@@ -11,6 +11,7 @@ import { FriendEventType, ThreadType } from "../../dist/index.js";
 import { discoverAccounts, isValidCredentials, onlyAccount, readCredentials, writePrivateJson } from "../common.mjs";
 import {
     findCoordinates,
+    formatBytes,
     friendEventInfo,
     groupEventText,
     groupSettingChanges,
@@ -24,6 +25,7 @@ import {
     summarize,
     systemNoticeText,
     isRedundantNotice,
+    tooLargeText,
     voipSummary,
 } from "../content.mjs";
 import {
@@ -46,6 +48,7 @@ import {
     captionOf,
     describeContent,
     downloadAttachment,
+    FileTooLargeError,
     imageSize,
     sniffType,
     isBotEcho,
@@ -229,8 +232,33 @@ test("downloadAttachment bỏ qua sticker và từ chối file quá lớn", asyn
     const big = { data: { msgType: "share.file", content: { title: "big.zip", href: "https://cdn.zalo/big" } } };
     await assert.rejects(
         downloadAttachment(big, fakeFetch("x", { "content-length": String(999 * 1024 * 1024) })),
-        /quá lớn/,
+        (error) => error instanceof FileTooLargeError && error.bytes === 999 * 1024 * 1024,
     );
+});
+
+test("tooLargeText nói rõ kích thước, giới hạn và giữ link gốc", () => {
+    // Video gửi dạng tệp trong nhóm (26/11/2026): 27919601 byte, vượt 20 MiB.
+    const file = {
+        data: {
+            msgType: "share.file",
+            content: { title: "Recording 2026-11-26 123845.mp4", href: "https://file-stal.dlfl.vn/gr/x" },
+        },
+    };
+    assert.equal(
+        tooLargeText(file, 27919601, 20 * 1024 * 1024),
+        "📎 Recording 2026-11-26 123845.mp4 (26,6 MB)\n" +
+            "⚠️ Tệp lớn hơn giới hạn 20 MB nên không lưu được vào hộp thư. " +
+            "Mở link bên dưới sớm (link Zalo sẽ hết hạn) hoặc xem trên Zalo.\n" +
+            "https://file-stal.dlfl.vn/gr/x",
+    );
+    const video = { data: { msgType: "chat.video.msg", content: { title: "Bé ăn", href: "ftp://x" } } };
+    assert.equal(
+        tooLargeText(video, 0, 20 * 1024 * 1024),
+        "🎬 Video: Bé ăn\n⚠️ Tệp lớn hơn giới hạn 20 MB nên không lưu được vào hộp thư. Xem trên Zalo.",
+    );
+    assert.equal(formatBytes(5.5 * 1024 * 1024), "5,5 MB");
+    assert.equal(formatBytes(1234567), "1,18 MB");
+    assert.equal(formatBytes(0), "");
 });
 
 // --- Nội dung giàu (payload rút gọn từ tin thật, dữ liệu giả) ---

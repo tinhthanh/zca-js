@@ -25,6 +25,7 @@ import {
     RecentMessages,
     summarize,
     systemNoticeText,
+    tooLargeText,
 } from "./content.mjs";
 import { handleCallSignal } from "./call.mjs";
 
@@ -170,6 +171,14 @@ function withExtension(name, contentType) {
     return `${clean}.${EXT_BY_TYPE[(contentType || "").split(";")[0]] || "bin"}`;
 }
 
+/** Tệp vượt MAX_FILE_BYTES; `bytes` là kích thước thật (content-length hoặc số byte đã tải). */
+export class FileTooLargeError extends Error {
+    constructor(bytes) {
+        super("file quá lớn");
+        this.bytes = bytes;
+    }
+}
+
 // Ảnh trong album tới trước khi CDN có dữ liệu: CDN trả 200 với body rỗng vài giây đầu.
 export const EMPTY_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 
@@ -182,9 +191,9 @@ async function fetchFile(
         const response = await fetchImpl(href, { signal: AbortSignal.timeout(60_000) });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const declared = Number(response.headers.get("content-length") || 0);
-        if (declared > MAX_FILE_BYTES) throw new Error("file quá lớn");
+        if (declared > MAX_FILE_BYTES) throw new FileTooLargeError(declared);
         const data = Buffer.from(await response.arrayBuffer());
-        if (data.length > MAX_FILE_BYTES) throw new Error("file quá lớn");
+        if (data.length > MAX_FILE_BYTES) throw new FileTooLargeError(data.length);
         if (data.length === 0) {
             if (attempt >= delays.length) throw new Error("CDN trả file rỗng");
             await sleep(delays[attempt]);
@@ -290,6 +299,8 @@ async function collect(account, api, message) {
             attachments.push(file);
         }
     } catch (error) {
+        // Quá giới hạn: nói rõ kích thước và giới hạn để nhân viên biết vì sao không xem được.
+        if (error instanceof FileTooLargeError) text = tooLargeText(message, error.bytes, MAX_FILE_BYTES);
         log(account, "gateway", `Không tải được file đính kèm, gửi mô tả thay thế: ${error.message}`);
     }
     return { text, attachments };

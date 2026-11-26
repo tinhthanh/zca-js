@@ -223,6 +223,31 @@ function mediaSummary(message) {
     return title && type !== "chat.sticker" ? `${MEDIA_LABELS[type]}: ${title}` : MEDIA_LABELS[type];
 }
 
+/** Kích thước tệp cho nhân viên đọc, vd. 27919601 -> "26,6 MB" (MiB, dấu phẩy thập phân). */
+export function formatBytes(bytes) {
+    const mb = Number(bytes) / (1024 * 1024);
+    if (!Number.isFinite(mb) || mb <= 0) return "";
+    const rounded = mb >= 10 ? Math.round(mb * 10) / 10 : Math.round(mb * 100) / 100;
+    return `${String(rounded).replace(".", ",")} MB`;
+}
+
+/**
+ * Tin có tệp vượt giới hạn tải về (GATEWAY_MAX_FILE_MB): nhãn kèm kích thước, lời giải thích
+ * và link gốc. Link CDN của Zalo hết hạn sau một thời gian nên nhắc mở sớm hoặc xem trên Zalo.
+ */
+export function tooLargeText(message, bytes, limitBytes) {
+    const c = message.data?.content && typeof message.data.content === "object" ? message.data.content : {};
+    const size = formatBytes(bytes);
+    const limit = formatBytes(limitBytes);
+    const href = typeof c.href === "string" && /^https?:\/\//.test(c.href) ? c.href : "";
+    return joinLines(
+        `${mediaSummary(message) || "📎 Tệp"}${size ? ` (${size})` : ""}`,
+        `⚠️ Tệp lớn hơn giới hạn ${limit || "tải về"} nên không lưu được vào hộp thư. ` +
+            (href ? "Mở link bên dưới sớm (link Zalo sẽ hết hạn) hoặc xem trên Zalo." : "Xem trên Zalo."),
+        href,
+    );
+}
+
 /** Dòng tóm tắt một tin để nhớ (cho thu hồi/reaction) và để trích dẫn. */
 export function summarize(message) {
     const text = (mediaSummary(message) || describeContent(message)).replace(/\s+/g, " ").trim();
