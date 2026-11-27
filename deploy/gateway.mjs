@@ -1063,6 +1063,29 @@ export async function requestFriend(api, payload) {
     }
 }
 
+/**
+ * Quan hệ bạn bè với khách `uid` (omi outreach), chỉ đọc: không gửi lời mời, không tra số điện thoại.
+ * Trả {status, body}: 200 {status: friend|requested|requesting|none, uid}; 400 {error}; 502 {status: "error", code, error}.
+ * requested: mình đã mời khách; requesting: khách đã mời mình.
+ */
+export async function friendStatus(api, payload) {
+    const uid = String(payload?.uid ?? "").trim();
+    if (!/^\d{5,25}$/.test(uid)) return { status: 400, body: { error: "uid phải là uid Zalo (chữ số)." } };
+    try {
+        const state = await api.getFriendRequestStatus(uid);
+        const status = state?.is_friend
+            ? "friend"
+            : state?.is_requested
+              ? "requested"
+              : state?.is_requesting
+                ? "requesting"
+                : "none";
+        return { status: 200, body: { status, uid } };
+    } catch (error) {
+        return zaloFailure(error, { status: "error" });
+    }
+}
+
 /** Nhắc hẹn 1-1 với khách (createReminder). Trả {status, body}: 200 {reminder_id}, 400, 502 {code, error}. */
 export async function createUserReminder(api, payload) {
     const threadId = String(payload?.thread_id || "").trim();
@@ -1102,6 +1125,20 @@ async function handleFriendRequest(req, res) {
     const phone = maskPhone(normalizePhone(payload.phone));
     const code = body.code != null ? ` (mã ${body.code})` : "";
     log(payload.account, "gateway", `Kết bạn ${phone}: ${body.status}${code}.`);
+    replyJSON(res, status, body);
+}
+
+async function handleFriendStatus(req, res) {
+    if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
+    const payload = await readJSON(req, res);
+    if (!payload) return;
+    const api = apis.get(payload.account);
+    if (!api) return replyJSON(res, 404, { status: "error", code: null, error: UNKNOWN_ACCOUNT });
+    const { status, body } = await friendStatus(api, payload);
+    if (status !== 200) {
+        const code = body.code != null ? `, mã ${body.code}` : "";
+        log(payload.account, "gateway", `❌ Xem trạng thái kết bạn thất bại (${status}${code}).`);
+    }
     replyJSON(res, status, body);
 }
 
@@ -1148,6 +1185,8 @@ export function startSendServer(extra = null) {
             handleAcceptFriend(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/friend/request") {
             handleFriendRequest(req, res).catch(() => reply(res, 500, "error"));
+        } else if (req.method === "POST" && req.url === "/friend/status") {
+            handleFriendStatus(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/reminder") {
             handleReminder(req, res).catch(() => reply(res, 500, "error"));
         } else if (req.method === "POST" && req.url === "/call/signal") {
