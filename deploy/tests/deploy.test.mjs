@@ -46,6 +46,7 @@ import {
     sendFailure,
     createUserReminder,
     requestFriend,
+    friendStatus,
     mp4Info,
     solidPng,
     captionOf,
@@ -1311,6 +1312,49 @@ test("requestFriend: gửi lời mời và ánh xạ mã 225, 222, 215, mã khá
         phone: "0901234567",
     });
     assert.deepEqual(net, { status: 502, body: { status: "error", code: null, error: "timeout" } });
+});
+
+test("friendStatus: chỉ đọc getFriendRequestStatus, không gửi lời mời, không tra số", async () => {
+    const cases = [
+        [{ is_friend: 1, is_requested: 0, is_requesting: 0 }, "friend"],
+        [{ is_friend: 0, is_requested: 1, is_requesting: 0 }, "requested"],
+        [{ is_friend: 0, is_requested: 0, is_requesting: 1 }, "requesting"],
+        [{ is_friend: 0, is_requested: 0, is_requesting: 0 }, "none"],
+        [null, "none"],
+    ];
+    for (const [state, expected] of cases) {
+        const api = fakeFriendApi({ state: state ?? undefined });
+        if (state === null) api.getFriendRequestStatus = async () => null;
+        assert.deepEqual(await friendStatus(api, { uid: " 111222333 " }), {
+            status: 200,
+            body: { status: expected, uid: "111222333" },
+        });
+        assert.ok(!api.calls.some(([name]) => ["send", "accept", "findUser"].includes(name)));
+    }
+});
+
+test("friendStatus: uid sai dạng là 400 và không gọi Zalo", async () => {
+    for (const uid of [undefined, "", "abc", "1234", "1".repeat(26), "0901 234"]) {
+        const api = fakeFriendApi();
+        const res = await friendStatus(api, { uid });
+        assert.equal(res.status, 400);
+        assert.equal(typeof res.body.error, "string");
+        assert.equal(api.calls.length, 0);
+    }
+});
+
+test("friendStatus: lỗi Zalo là 502 giữ mã thô; lỗi mạng mã null", async () => {
+    assert.deepEqual(
+        await friendStatus(fakeFriendApi({ state: new ZaloApiError("quá giới hạn", 221) }), { uid: 111222333 }),
+        {
+            status: 502,
+            body: { status: "error", code: 221, error: "quá giới hạn" },
+        },
+    );
+    assert.deepEqual(await friendStatus(fakeFriendApi({ state: new Error("timeout") }), { uid: "111222333" }), {
+        status: 502,
+        body: { status: "error", code: null, error: "timeout" },
+    });
 });
 
 test("createUserReminder: nhắc hẹn 1-1, kiểm tra đầu vào, giữ mã lỗi Zalo", async () => {
