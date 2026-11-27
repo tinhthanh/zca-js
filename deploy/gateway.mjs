@@ -763,6 +763,24 @@ function isPermanent(error) {
     return error instanceof ZaloApiError && error.code != null;
 }
 
+/**
+ * Lý do gửi tin thất bại cho gateway, dạng {"error"} (gateway đưa vào ghi chú ⚠️ và omi outreach hiện cho
+ * nhân viên). Zalo đã trả câu tiếng Việt (vd. chặn tin người lạ, số không hợp lệ), giữ nguyên kèm mã;
+ * lỗi không có mã (mạng, Zalo không trả lời) là tạm thời, gateway thử lại.
+ */
+export function sendFailure(error) {
+    const message = String(error instanceof Error ? error.message : error || "")
+        .trim()
+        .slice(0, 300);
+    if (isPermanent(error)) {
+        return {
+            status: 422,
+            body: { error: `Zalo từ chối: ${message || "không rõ lý do"} (mã ${error.code}).`, code: error.code },
+        };
+    }
+    return { status: 502, body: { error: `Không gửi được qua Zalo: ${message || "lỗi kết nối"}.` } };
+}
+
 async function handleSend(req, res) {
     if (req.headers.authorization !== `Bearer ${GATEWAY_TOKEN}`) return reply(res, 401, "unauthorized");
     const chunks = [];
@@ -832,7 +850,8 @@ async function handleSend(req, res) {
             "gateway",
             `❌ Gửi tin trả lời thất bại${permanent ? " (Zalo từ chối)" : ""}: ${error?.message || error}`,
         );
-        reply(res, permanent ? 422 : 502, permanent ? "rejected by zalo" : "send failed");
+        const { status, body } = sendFailure(error);
+        replyJSON(res, status, body);
     }
 }
 

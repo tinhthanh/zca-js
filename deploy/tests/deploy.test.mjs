@@ -43,6 +43,7 @@ import { EventTrace, openTrace, removeTrace, traceAccounts } from "../trace.mjs"
 import { closeCause, ConnectionHistory } from "../history.mjs";
 import {
     acceptFriend,
+    sendFailure,
     createUserReminder,
     requestFriend,
     mp4Info,
@@ -1348,4 +1349,20 @@ test("createUserReminder: nhắc hẹn 1-1, kiểm tra đầu vào, giữ mã l�
     });
     const empty = { createReminder: async () => ({}) };
     assert.equal((await createUserReminder(empty, payload)).status, 502);
+});
+
+test("sendFailure: Zalo refusal keeps Zalo's Vietnamese reason and code (422); other errors are temporary (502)", () => {
+    const refused = sendFailure(
+        new ZaloApiError(
+            "Bạn chưa thể gửi tin nhắn đến người này vì người này chặn không nhận tin nhắn từ người lạ.",
+            114,
+        ),
+    );
+    assert.equal(refused.status, 422);
+    assert.equal(refused.body.code, 114);
+    assert.match(refused.body.error, /^Zalo từ chối: Bạn chưa thể gửi tin nhắn.*\(mã 114\)\.$/);
+    const temp = sendFailure(new Error("socket hang up"));
+    assert.equal(temp.status, 502);
+    assert.equal(temp.body.error, "Không gửi được qua Zalo: socket hang up.");
+    assert.equal(sendFailure(new ZaloApiError("", 7)).body.error, "Zalo từ chối: không rõ lý do (mã 7).");
 });
